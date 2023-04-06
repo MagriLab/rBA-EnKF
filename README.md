@@ -11,6 +11,5 @@ Available models:
 - Rijke tube (dimensional with Galerkin discretisation)
 - Van der Pol
  
-Available bias models:
-- Linear bias
-- Echo-State Network
+Available bias estimator:
+- Echo State Network
