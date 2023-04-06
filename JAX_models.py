@@ -7,6 +7,8 @@ import os
 import time
 
 import numpy as np
+import jax.numpy as jnp
+from jax import jit
 from scipy.integrate import solve_ivp
 import multiprocessing as mp
 from functools import partial
@@ -19,14 +21,39 @@ if num_proc > 1:
     num_proc = int(num_proc)
 
 rng = np.random.default_rng(6)
+import diffrax
+import equinox as eqx  # https://github.com/patrick-kidger/equinox
+import jax
+import jax.numpy as jnp
+jax.config.update("jax_enable_x64", True)
+TF_CPP_MIN_LOG_LEVEL=0
 
+
+@jit
+def forecast(t, q0, func, *kwargs):
+    """ 4th order RK for autonomous systems described by func """
+    dt = t[1] - t[0]
+    N = len(t) - 1
+    qhist = [q0]
+    for _ in range(N):
+        k1 = dt * func(dt, q0, *kwargs)
+        k2 = dt * func(dt, q0 + k1 / 2, *kwargs)
+        k3 = dt * func(dt, q0 + k2 / 2, *kwargs)
+        k4 = dt * func(dt, q0 + k3, *kwargs)
+        q0 = q0 + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+        qhist.append(q0)
+    print(qhist)
+    return qhist
 
 # %% =================================== PARENT MODEL CLASS ============================================= %% #
 class Model:
     """ Parent Class with the general thermoacoustic model
         properties and methods definitions.
     """
-    attr_model: dict = dict(t=0., psi0=np.empty(1), alpha0=np.empty(1), ensemble=False)
+    dtype = object
+    attr_parent: dict = dict(dt=1E-4, t=0.,
+                             t_transient=1.5, t_CR=0.04,
+                             psi0=np.empty(1), alpha0=np.empty(1), ensemble=False)
 
     attr_ens: dict = dict(m=10, est_p=[], est_s=True, est_b=False,
                           biasType=Bias.NoBias, inflation=1.01,
@@ -37,13 +64,13 @@ class Model:
     def __init__(self, TAdict):
         model_dict = TAdict.copy()
         # ================= INITIALISE THERMOACOUSTIC MODEL ================== ##
-        for key, val in self.attr.items():
+        for key, val in self.attr_child.items():
             if key in model_dict.keys():
                 setattr(self, key, model_dict[key])
             else:
                 setattr(self, key, val)
 
-        for key, val in Model.attr_model.items():
+        for key, val in Model.attr_parent.items():
             if key in model_dict.keys():
                 setattr(self, key, model_dict[key])
             else:
@@ -67,7 +94,7 @@ class Model:
 
     def printModelParameters(self):
         print('\n ------------------ {} Model Parameters ------------------ '.format(self.name))
-        for k in self.attr.keys():
+        for k in self.attr_child.keys():
             print('\t {} = {}'.format(k, getattr(self, k)))
 
     # --------------------- DEFINE OBS-STATE MAP --------------------- ##
@@ -203,13 +230,13 @@ class Model:
     @staticmethod
     def forecast(y0, fun, t, params, alpha=None):
         # SOLVE IVP ========================================
-        out = solve_ivp(fun, t_span=(t[0], t[-1]), y0=y0, t_eval=t, method='RK45', args=(params, alpha))
-        psi = out.y.T
+        # out = solve_ivp(fun, t_span=(t[0], t[-1]), y0=y0, t_eval=t, method='RK45', args=(params, alpha))
+        # psi = out.y.T
         # ODEINT =========================================== THIS WORKS AS IF HARD CODED
         # psi = odeint(fun, y0, t_interp, (params,))
         #
         # HARD CODED RUGGE KUTTA 4TH ========================
-        # psi = RK4(t_interp, y0, fun, params)
+        psi = RK4_J(t, y0, fun, params, alpha)
         return psi
 
     def getAlpha(self, psi=None):
@@ -241,13 +268,13 @@ class Model:
         self_dict = self.govEqnDict()
 
         if not self.ensemble:
-            psi = [Model.forecast(self.psi[:, 0], self.timeDerivative, t, params=self_dict, alpha=self.alpha0)]
+            psi = [forecast(self.psi[:, 0], self.timeDerivative, t, params=self_dict, alpha=self.alpha0)]
             psi = np.array(psi).transpose(1, 2, 0)
             return psi[1:], t[1:]
 
         if not averaged:
             alpha = self.getAlpha()
-            fun_part = partial(Model.forecast, fun=self.timeDerivative, t=t, params=self_dict)
+            fun_part = partial(forecast, fun=self.timeDerivative, t=t, params=self_dict)
             sol = [self.pool.apply_async(fun_part, kwds={'y0': self.psi[:, mi].T, 'alpha': alpha[mi]})
                    for mi in range(self.m)]
             psi = [s.get() for s in sol]
@@ -256,7 +283,7 @@ class Model:
             psi_std = (self.psi - psi_mean) / psi_mean
             if alpha is None:
                 alpha = self.getAlpha(psi_mean)[0]
-            psi_mean = Model.forecast(y0=psi_mean[:, 0], fun=self.timeDerivative, t=t, params=self_dict, alpha=alpha)
+            psi_mean = forecast(y0=psi_mean[:, 0], fun=self.timeDerivative, t=t, params=self_dict, alpha=alpha)
             psi = [psi_mean * (1 + psi_std[:, ii]) for ii in range(self.m)]
 
         # Rearrange dimensions to be Nt x N x m and remove initial condition
@@ -273,8 +300,7 @@ class VdP(Model):
     """
 
     name: str = 'VdP'
-    attr: dict = dict(dt=1E-4, t_transient=1.5, t_CR=0.04,
-                            omega=2 * np.pi * 120., law='tan',
+    attr_child: dict = dict(omega=2 * np.pi * 120., law='tan',
                             zeta=60., beta=70., kappa=4.0, gamma=1.7)  # beta, zeta [rad/s]
     params: list = ['zeta', 'kappa', 'beta']  # ,'omega', 'gamma']
 
@@ -329,7 +355,7 @@ class VdP(Model):
         elif P['law'] == 'tan':  # arc tan model
             dmu_dt -= mu * (A['kappa'] * eta ** 2) / (1. + A['kappa'] / A['beta'] * eta ** 2)
 
-        return (mu, dmu_dt) + (0,) * P['Na']
+        return jnp.stack((mu, dmu_dt) + (0,) * P['Na'])
 
 
 # %% ==================================== RIJKE TUBE MODEL ============================================== %% #
@@ -349,16 +375,18 @@ class Rijke(Model):
     """
 
     name: str = 'Rijke'
-    attr: dict = dict(dt=1E-4, t_transient=1., t_CR=0.02,
-                      Nm=10, Nc=10, Nmic=6,
-                      beta=4.0, tau=1.5E-3, C1=.05, C2=.01, kappa=1E5,
-                      xf=0.2, L=1., law='sqrt')
+    attr_child: dict = dict(Nm=10, Nc=10, Nmic=6,
+                            beta=4.0, tau=1.5E-3, C1=.05, C2=.01, kappa=1E5,
+                            xf=0.2, L=1., law='sqrt')
     params: list = ['beta', 'tau', 'C1', 'C2', 'kappa']
 
     def __init__(self, TAdict=None, DAdict=None):
         if TAdict is None:
             TAdict = {}
         super().__init__(TAdict)
+
+        self.t_transient = 1.
+        self.t_CR = 0.02
 
         if DAdict is not None and 'est_p' in DAdict.keys() and 'tau' in DAdict['est_p']:
             self.tau_adv, self.Nc = 1E-2, 50
@@ -582,14 +610,24 @@ class Lorenz63(Model):
 
 
 if __name__ == '__main__':
-    MyModel = Rijke
-    paramsTA = dict(dt=2E-4)
+    MyModel = VdP
+    paramsTA = dict(law='tan', dt=2E-4)
+    t_max = 10.
 
     t1 = time.time()
     # Non-ensemble case =============================
     case = MyModel(paramsTA)
-    state, t_ = case.timeIntegrate(int(case.t_transient * 2 / case.dt))
-    case.updateHistory(state, t_)
+    Nt = int(case.t_transient * 2 / case.dt)
+    # state, t_ = case.timeIntegrate(Nt)
+
+    t = np.linspace(case.t, case.t + Nt * case.dt, Nt + 1)
+    self_dict = case.govEqnDict()
+
+    psi = [forecast(case.psi[:, 0], case.timeDerivative, t, params=self_dict, alpha=case.alpha0)]
+    psi = np.array(psi).transpose(1, 2, 0)
+    psi = psi[1:]
+    t = t[1:]
+    case.updateHistory(psi, t)
 
     print('Elapsed time = ', str(time.time() - t1))
 
@@ -606,60 +644,60 @@ if __name__ == '__main__':
     i, j = [0, 1]
     ax[1].plot(t_h[-t_zoom:], y[-t_zoom:, 0], color='green')
 
-    # Ensemble case =============================
-    paramsDA = dict(m=10, est_p=['beta'])
-    case = MyModel(paramsTA, paramsDA)
-
-    t1 = time.time()
-    for _ in range(1):
-        state, t_ = case.timeIntegrate(int(1. / case.dt))
-        case.updateHistory(state, t_)
-    for _ in range(5):
-        state, t_ = case.timeIntegrate(int(.1 / case.dt), averaged=True)
-        case.updateHistory(state, t_)
-
-    print('Elapsed time = ', str(time.time() - t1))
-
-    t_h = case.hist_t
-    t_zoom = min([len(t_h) - 1, int(0.05 / case.dt)])
-
-    _, ax = plt.subplots(1, 3, figsize=[15, 5])
-    plt.suptitle('Ensemble case')
-    # State evolution
-    y, lbl = case.getObservableHist(), case.obsLabels
-    lbl = lbl[0]
-    ax[0].plot(t_h, y[:, 0], color='blue', label=lbl)
-    i, j = [0, 1]
-    ax[1].plot(t_h[-t_zoom:], y[-t_zoom:, 0], color='blue')
-
-    ax[0].set(xlabel='t', ylabel=lbl, xlim=[t_h[0], t_h[-1]])
-    ax[1].set(xlabel='t', xlim=[t_h[-t_zoom], t_h[-1]])
-
-    # Params
-
-    ai = - case.Na
-    max_p, min_p = -1000, 1000
-    c = ['g', 'sandybrown', 'mediumpurple', 'cyan']
-    mean = np.mean(case.hist, -1, keepdims=True)
-    for p in case.est_p:
-        superscript = '^\mathrm{init}$'
-        # reference_p = truth['true_params']
-        reference_p = case.alpha0
-
-        mean_p = mean[:, ai].squeeze() / reference_p[p]
-        std = np.std(case.hist[:, ai] / reference_p[p], axis=1)
-
-        max_p = max(max_p, max(mean_p))
-        min_p = min(min_p, min(mean_p))
-
-        ax[2].plot(t_h, mean_p, color=c[-ai], label='$\\' + p + '/\\' + p + superscript)
-
-        ax[2].set(xlabel='$t$', xlim=[t_h[0], t_h[-1]])
-        ax[2].fill_between(t_h, mean_p + std, mean_p - std, alpha=0.2, color=c[-ai])
-        ai += 1
-    ax[2].legend(bbox_to_anchor=(1., 1.), loc="upper left", ncol=1)
-    ax[2].plot(t_h[1:], t_h[1:] / t_h[1:], '-', color='k', linewidth=.5)
-    ax[2].set(ylim=[min_p - 0.1, max_p + 0.1])
-
-    plt.tight_layout()
-    plt.show()
+    # # Ensemble case =============================
+    # paramsDA = dict(m=10, est_p=['beta'])
+    # case = MyModel(paramsTA, paramsDA)
+    #
+    # t1 = time.time()
+    # for _ in range(1):
+    #     state, t_ = case.timeIntegrate(int(1. / case.dt))
+    #     case.updateHistory(state, t_)
+    # for _ in range(5):
+    #     state, t_ = case.timeIntegrate(int(.1 / case.dt), averaged=True)
+    #     case.updateHistory(state, t_)
+    #
+    # print('Elapsed time = ', str(time.time() - t1))
+    #
+    # t_h = case.hist_t
+    # t_zoom = min([len(t_h) - 1, int(0.05 / case.dt)])
+    #
+    # _, ax = plt.subplots(1, 3, figsize=[15, 5])
+    # plt.suptitle('Ensemble case')
+    # # State evolution
+    # y, lbl = case.getObservableHist(), case.obsLabels
+    # lbl = lbl[0]
+    # ax[0].plot(t_h, y[:, 0], color='blue', label=lbl)
+    # i, j = [0, 1]
+    # ax[1].plot(t_h[-t_zoom:], y[-t_zoom:, 0], color='blue')
+    #
+    # ax[0].set(xlabel='t', ylabel=lbl, xlim=[t_h[0], t_h[-1]])
+    # ax[1].set(xlabel='t', xlim=[t_h[-t_zoom], t_h[-1]])
+    #
+    # # Params
+    #
+    # ai = - case.Na
+    # max_p, min_p = -1000, 1000
+    # c = ['g', 'sandybrown', 'mediumpurple', 'cyan']
+    # mean = np.mean(case.hist, -1, keepdims=True)
+    # for p in case.est_p:
+    #     superscript = '^\mathrm{init}$'
+    #     # reference_p = truth['true_params']
+    #     reference_p = case.alpha0
+    #
+    #     mean_p = mean[:, ai].squeeze() / reference_p[p]
+    #     std = np.std(case.hist[:, ai] / reference_p[p], axis=1)
+    #
+    #     max_p = max(max_p, max(mean_p))
+    #     min_p = min(min_p, min(mean_p))
+    #
+    #     ax[2].plot(t_h, mean_p, color=c[-ai], label='$\\' + p + '/\\' + p + superscript)
+    #
+    #     ax[2].set(xlabel='$t$', xlim=[t_h[0], t_h[-1]])
+    #     ax[2].fill_between(t_h, mean_p + std, mean_p - std, alpha=0.2, color=c[-ai])
+    #     ai += 1
+    # ax[2].legend(bbox_to_anchor=(1., 1.), loc="upper left", ncol=1)
+    # ax[2].plot(t_h[1:], t_h[1:] / t_h[1:], '-', color='k', linewidth=.5)
+    # ax[2].set(ylim=[min_p - 0.1, max_p + 0.1])
+    #
+    # plt.tight_layout()
+    # plt.show()

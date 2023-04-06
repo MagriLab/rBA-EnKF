@@ -10,14 +10,14 @@ import numpy as np
 import pylab as plt
 import pickle
 import scipy.io as sio
-
+from compress_pickle import load, dump
 from functools import lru_cache
+import pathlib
+
+from scipy.interpolate import interp1d
+from scipy.signal import find_peaks
 
 rng = np.random.default_rng(6)
-
-
-#
-# data_folder = os.getcwd() + '\\data\\'
 
 
 @lru_cache(maxsize=10)
@@ -41,59 +41,69 @@ def Cheb(Nc, lims=[0, 1], getg=False):  # ______________________________________
         return D
 
 
-def createObservations(classType, TA_params=None, t_min=.5, t_max=8., kmeas=1E-3):
+def createObservations(classParams=None):
+    if type(classParams) is dict:
+        TA_params = classParams.copy()
+        classType = TA_params['model']
+        if 't_max' in TA_params.keys():
+            t_max = TA_params['t_max']
+        else:
+            t_max = 8.
+            print('t_max=8.')
+    else:
+        raise ValueError('classParams must be dict')
+
+    # Wave case: load .mat file ====================================
     if type(classType) is str:
         try:
-            mat = sio.loadmat('data/' + classType)
-            p_obs = mat['p_obs'].transpose()
-            t_obs = mat['t_obs'].transpose()
-            if len(np.shape(t_obs)) > 1:
-                t_obs = np.squeeze(t_obs, axis=-1)
-            dt = t_obs[1] - t_obs[0]
-            if t_obs[-1] < t_max:
-                t_max = t_obs[-1]
-                print('Data too short. Redefine t_max = ', t_max)
-
+            mat = sio.loadmat('data/Truth_wave.mat')
         except:
             raise ValueError('File ' + classType + ' not defined')
+        p_obs = mat['p_mic'].transpose()
+        t_obs = mat['t_mic'].transpose()
+        if len(np.shape(t_obs)) > 1:
+            t_obs = np.squeeze(t_obs, axis=-1)
 
-    else:
-        if TA_params is None:
-            law = 'sqrt'
-        else:
-            law = TA_params['law']
+        if t_obs[-1] > t_max:
+            idx = np.argmin(abs(t_obs - t_max))
+            t_obs = t_obs[:idx + 1]
+            p_obs = p_obs[:idx + 1]
+            print('Data too long. Redefine t_max = ', t_max)
 
-        name = '/data/Truth_{}_{}_tmax_{:.2}'.format(classType.name, law, t_max)
-        name = os.path.join(os.getcwd() + name)
+        return p_obs, t_obs, 'Wave'
 
-        if os.path.isfile(name):
-            print('Loading Truth')
-            with open(name, 'rb') as f:
-                case = pickle.load(f)
-        else:
-            case = classType(TA_params)
-            psi, t = case.timeIntegrate(Nt=int(t_max / case.dt))
-            case.updateHistory(psi, t)
+    # ============================================================
+    # Add key parameters to filename
+    suffix = ''
+    key_save = classType.params + ['law']
+    for key, val in TA_params.items():
+        if key in key_save:
+            if type(val) == str:
+                suffix += val + '_'
+            else:
+                suffix += key + '{:.2e}'.format(val) + '_'
 
-            # print('Creating Truth. Not saving - uncomment lines below')
-            with open(name, 'wb') as f:
-                pickle.dump(case, f)
-        # Retrieve observables
-        t_obs = case.hist_t
-        p_obs, _ = case.getObservableHist()
-        if len(np.shape(p_obs)) > 2:
-            p_obs = np.squeeze(p_obs, axis=2)
-        dt = case.dt
+    name = os.path.join(os.getcwd() + '/data/')
+    os.makedirs(name, exist_ok=True)
+    name += 'Truth_{}_{}tmax-{:.2}'.format(classType.name, suffix, t_max)
 
-    # Keep only after transient solution
-    kmeas = int(kmeas / dt)
-    idx = np.arange(int(t_min / dt), int(t_max / dt), kmeas)
+    # Load or create and save file
+    case = classType(TA_params)
+    psi, t = case.timeIntegrate(Nt=int(t_max / case.dt))
+    case.updateHistory(psi, t)
+    case.close()
+    with open(name + '.lzma', 'wb') as f:
+        dump(case, f)
+    # Retrieve observables
+    p_obs = case.getObservableHist()
+    if len(np.shape(p_obs)) > 2:
+        p_obs = np.squeeze(p_obs, axis=-1)
 
-    return p_obs, t_obs, p_obs[idx], t_obs[idx]
+    return p_obs, case.hist_t, name.split('Truth_')[-1]
 
 
 def RK4(t, q0, func, *kwargs):
-    ''' 4th order RK for autonomous systems described by func '''
+    """ 4th order RK for autonomous systems described by func """
     dt = t[1] - t[0]
     N = len(t) - 1
     qhist = [q0]
@@ -120,7 +130,7 @@ def plotHistory(ensemble, truth=None):  # ______________________________________
         ax[i, j].fill_between(x, mean + std, mean - std, alpha=.2, color=c)
         if yl is True:
             ax[i, j].set(ylabel=yl)
-        ax[i, j].set(xlabel='$t$', xlim=[x[0], x[-1]])
+        ax[i, j].set(xlabel='$t_interp$', xlim=[x[0], x[-1]])
         ax[i, j].legend(bbox_to_anchor=(1., 1.), loc="upper left", ncol=1)
 
     t = ensemble.hist_t
@@ -154,22 +164,95 @@ def plotHistory(ensemble, truth=None):  # ______________________________________
     plt.tight_layout()
     plt.show()
 
-## Uncomment the lines below to create the bias signal for training ESN
-# if __name__ == '__main__':
-#     import VdP as TAmodel
-#     from datetime import date
+
+def interpolate(t_y, y, t_eval, method='cubic', ax=0, bound=False):
+    spline = interp1d(t_y, y, kind=method, axis=ax, copy=True, bounds_error=bound, fill_value=0)
+    return spline(t_eval)
+
+
+def getEnvelope(timeseries_x, timeseries_y, rejectCloserThan=0):
+    peaks, peak_properties = find_peaks(timeseries_y, distance=200)
+    u_p = interp1d(timeseries_x[peaks], timeseries_y[peaks], bounds_error=False)
+    return u_p
+
+
+def CR(y_true, y_est):
+    # time average of both quantities
+    y_tm = np.mean(y_true, 0, keepdims=True)
+    y_em = np.mean(y_est, 0, keepdims=True)
+
+    # correlation
+    C = np.sum((y_est - y_em) * (y_true - y_tm)) / np.sqrt(np.sum((y_est - y_em) ** 2) * np.sum((y_true - y_tm) ** 2))
+    # root-mean square error
+    R = np.sqrt(np.sum((y_true - y_est) ** 2) / np.sum(y_true ** 2))
+    return C, R
+
 #
-#     HOM = createObservations(TAmodel, LOM=False, name='HOM_bias', t_max=15.)
-#     LOM = createObservations(TAmodel, LOM=True, name='LOM_bias', t_max=15.)
+# def get_CR_values(results_folder):
 #
-#     bias = HOM[0].hist[:, 0, :] - LOM[0].hist[:, 0, :]
+#     Ls, RBs, RUs, CBs, CUs = [],[],[],[],[]
+#     # ==================================================================================================================
+#     ii= -1
+#     for Ldir in os.listdir(results_folder):
+#         Ldir = results_folder + Ldir + '/'
+#         if not os.path.isdir(Ldir):
+#             continue
+#         ii += 1
+#         Ls.append(Ldir.split('L')[-1])
+#         flag = True
+#         ks = []
 #
-#     np.savez('bias_VdP' + str(date.today()), bias=bias)
+#         L_RB, L_RU, L_CB, L_CU = [], [], [], []
+#         for ff in os.listdir(Ldir):
+#             if ff.find('_k') == -1:
+#                 continue
+#             k = float(ff.split('_k')[-1])
+#             ks.append(k)
+#             with open(Ldir + ff + '.gz', 'rb') as f:
+#                 params = load(f)
+#                 truth = load(f)
+#                 filter_ens = load(f)
 #
-#     fig, ax = plt.subplots(2, 1, figsize=[15, 10], tight_layout=True)
-#     ax[0].plot(HOM[0].hist_t, HOM[0].hist[:, 0], label='HOM')
-#     ax[0].plot(LOM[0].hist_t, LOM[0].hist[:, 0], 'y', label='LOM')
-#     ax[0].set(ylabel='$\eta$', xlabel='$t$', xlim=[14., 14.1])
-#     ax[0].legend(loc='best')
-#     ax[1].plot(LOM[0].hist_t, bias, 'mediumpurple')
-#     ax[1].set(ylabel='bias', xlabel='$t$', xlim=[14., 14.1])
+#             y, t = filter_ens.getObservableHist(), filter_ens.hist_t
+#             b, t_b = filter_ens.bias.hist, filter_ens.bias.hist_t
+#             y_truth = truth['y'][:len(y)]
+#             y = np.mean(y, -1)
+#
+#             # Unbiased signal error
+#             if filter_ens.bias.name == 'ESN':
+#                 y_unbiased = y[::filter_ens.bias.upsample] + b
+#                 y_unbiased = interpolate(t_b, y_unbiased, t)
+#             else:
+#                 y_unbiased = y + np.expand_dims(b, -1)
+#
+#             if flag:
+#                 N_CR = int(filter_ens.t_CR / filter_ens.dt)  # Length of interval to compute correlation and RMS
+#                 i0 = np.argmin(abs(t - truth['t_obs'][0]))  # start of assimilation
+#                 i1 = np.argmin(abs(t - truth['t_obs'][params['num_DA']-1]))  # end of assimilation
+#
+#             C, R = CR(y_truth[i1-N_CR:i1], y[i1-N_CR:i1])
+#             L_RB.append([R])
+#             L_CB.append([C])
+#             C, R = CR(y_truth[i1-N_CR:i1], y_unbiased[i1-N_CR:i1])
+#             L_RU.append([R])
+#             L_CU.append([C])
+#
+#             flag = False
+#         RBs.append(L_RB)
+#         RUs.append(L_RU)
+#         CBs.append(L_CB)
+#         CUs.append(L_CU)
+#
+#     # true and pre-DA R
+#     y_truth_u = y_truth - truth['b_true'][:len(y)]
+#     Ct, Rt = CR(y_truth[-N_CR:], y_truth_u[-N_CR:])
+#     Cpre, Rpre = CR(y_truth[i0 - N_CR:i0 + 1:], y[i0 - N_CR:i0 + 1:])
+#
+#     results = dict(Ls=Ls, ks=ks,
+#                    RBs=RBs, RUs=RUs,
+#                    Rt=Rt, Rpre=Rpre,
+#                    CBs=CBs, CUs=CUs,
+#                    Ct=Ct, Cpre=Cpre)
+#
+#     with open(results_folder + 'CR_data.gz', 'wb') as f:
+#         dump(results, f)
