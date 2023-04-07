@@ -65,15 +65,12 @@ def post_process_WhyAugment(results_dir, k_plot=None, L_plot=None, figs_dir=None
         figs_dir = results_dir + 'figs/'
     os.makedirs(figs_dir, exist_ok=True)
 
-    print(figs_dir)
-
     flag = True
     xtags, mydirs = [], []
     for Ldir in sorted(os.listdir(results_dir), key=str.lower):
         if not os.path.isdir(results_dir + Ldir + '/') or len(Ldir.split('_Augment')) == 1:
             continue
         mydirs.append(Ldir)
-
 
     k_files = []
     ks = []
@@ -103,7 +100,6 @@ def post_process_WhyAugment(results_dir, k_plot=None, L_plot=None, figs_dir=None
         L = int(L.split('L')[-1])
         if L_plot is not None and L not in L_plot:
             continue
-
 
         xtags.append('$L={}$'.format(L))
         if augment:
@@ -198,9 +194,9 @@ def post_process_WhyAugment(results_dir, k_plot=None, L_plot=None, figs_dir=None
     ax[1].set(ylabel='RMS error', ylim=[0, Rpre * 1.5])
     # axi.legend(bbox_to_anchor=(1., 1.), loc="upper left")
 
-    # plt.savefig(figs_dir + 'WhyAugment.svg', dpi=350)
-    plt.savefig(figs_dir + 'WhyAugment.pdf', dpi=350)
-    plt.show()
+    plt.savefig(figs_dir + 'WhyAugment.svg', dpi=350)
+    # plt.savefig(figs_dir + 'WhyAugment.pdf', dpi=350)
+    plt.close()
 
 
 # ==================================================================================================================
