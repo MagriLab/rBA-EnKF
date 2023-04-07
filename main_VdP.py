@@ -7,15 +7,15 @@ if __name__ == '__main__':
     from plotResults import *
     import os as os
 
-    path_dir = '/'.join(os.path.realpath(__file__).split('/')[:-1]) + '/'
-    os.chdir('/mscott/an553/')  # set working directory to mscott
+    path_dir = os.path.realpath(__file__).split('main')[0]
+    # os.chdir('/mscott/an553/')  # set working directory to mscott
 
     folder = 'results/VdP_final/'
     whyAugment_folder = folder + 'results_whyAugment_final/'
     loopParams_folder = folder + 'results_loopParams_final/'
 
-    run_whyAugment, run_loopParams = 0, 1
-    plot_whyAugment, plot_loopParams = 0, 0
+    run_whyAugment, run_loopParams = 0, 0
+    plot_whyAugment, plot_loopParams = 1, 0
 
     # %% ============================= SELECT TRUE AND FORECAST MODELS ================================= #
     true_params = {'model': TAModels.VdP,

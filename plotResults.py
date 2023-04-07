@@ -65,6 +65,8 @@ def post_process_WhyAugment(results_dir, k_plot=None, L_plot=None, figs_dir=None
         figs_dir = results_dir + 'figs/'
     os.makedirs(figs_dir, exist_ok=True)
 
+    print(figs_dir)
+
     flag = True
     xtags, mydirs = [], []
     for Ldir in sorted(os.listdir(results_dir), key=str.lower):
@@ -198,7 +200,7 @@ def post_process_WhyAugment(results_dir, k_plot=None, L_plot=None, figs_dir=None
 
     # plt.savefig(figs_dir + 'WhyAugment.svg', dpi=350)
     plt.savefig(figs_dir + 'WhyAugment.pdf', dpi=350)
-    plt.close()
+    plt.show()
 
 
 # ==================================================================================================================
