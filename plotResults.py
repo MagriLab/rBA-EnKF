@@ -319,7 +319,7 @@ def post_process_single_SE_Zooms(ensemble, true_data, filename=None):
         plt.show()
 
 
-def post_process_single(filter_ens, truth, params, filename=None, CR_file=None):
+def post_process_single(filter_ens, truth, params, filename=None, mic=0):
     filt = filter_ens.filt
     biasType = filter_ens.biasType
     Nt_extra = params['Nt_extra']
@@ -332,7 +332,10 @@ def post_process_single(filter_ens, truth, params, filename=None, CR_file=None):
     y_filter, t = filter_ens.getObservableHist(), filter_ens.hist_t
     b, t_b = filter_ens.bias.hist, filter_ens.bias.hist_t
 
+    y_filter = y_filter[:, mic]
     y_mean = np.mean(y_filter, -1)
+    b = b[:, mic]
+    obs = obs[:, mic]
 
     if hasattr(filter_ens.bias, 'upsample'):
         y_unbiased = y_mean[::filter_ens.bias.upsample] + b
@@ -347,8 +350,8 @@ def post_process_single(filter_ens, truth, params, filename=None, CR_file=None):
     i1 = np.argmin(abs(t - truth['t_obs'][-1]))  # end of assimilation
     y_filter, y_mean, t, y_unbiased = (yy[i0 - N_CR:i1 + N_CR] for yy in [y_filter, y_mean, t, y_unbiased])
 
-    y_truth = interpolate(truth['t'], truth['y'], t)
-    std = np.std(y_filter[:, 0, :], axis=1)
+    y_truth = interpolate(truth['t'], truth['y'][:, mic], t)
+    std = np.std(y_filter[:, :], axis=1)
 
     # %% PLOT time series ------------------------------------------------------------------------------------------
 
@@ -361,20 +364,18 @@ def post_process_single(filter_ens, truth, params, filename=None, CR_file=None):
     labels = [('Truth', 'Observation data', '', ''),
               ('', '', 'Unbiased filtered signal', ''),
               ('', '', '', 'Biased filtered signal')]
-    # y_lims = [min(min(y_truth[:, 0]), min(y_mean[:, 0])) * 1.1,
-    #           max(max(y_truth[:, 0]), max(y_mean[:, 0])) * 1.1]
-    y_lims = [np.min(y_truth[:N_CR, 0]) * 1.1,
-              np.max(y_truth[:N_CR, 0]) * 1.1]
+    y_lims = [np.min(y_truth[:N_CR]) * 1.1,
+              np.max(y_truth[:N_CR]) * 1.1]
     x_lims = [[t[0], t[-1]],
               [t[0], t[0] + 2 * filter_ens.t_CR],
               [t[-1] - 2 * filter_ens.t_CR, t[-1]]]
 
     for ax_, lbl, xl in zip([p_ax, zoomPre_ax, zoom_ax], labels, x_lims):
-        ax_.plot(t, y_truth[:, 0], color='lightgray', label=lbl[0], linewidth=8)
-        ax_.plot(t, y_unbiased[:, 0], '-', color='navy', label=lbl[2], linewidth=1.5)
-        ax_.plot(t, y_mean[:, 0], '--', color='lightseagreen', linewidth=1.5, alpha=0.9, label=lbl[3])
-        ax_.fill_between(t, y_mean[:, 0] + std, y_mean[:, 0] - std, alpha=0.2, color='lightseagreen')
-        ax_.plot(t_obs, obs[:, 0], '.', color='r', label=lbl[1], markersize=10)
+        ax_.plot(t, y_truth, color='lightgray', label=lbl[0], linewidth=8)
+        ax_.plot(t, y_unbiased, '-', color='navy', label=lbl[2], linewidth=1.5)
+        ax_.plot(t, y_mean, '--', color='lightseagreen', linewidth=1.5, alpha=0.9, label=lbl[3])
+        ax_.fill_between(t, y_mean + std, y_mean - std, alpha=0.2, color='lightseagreen')
+        ax_.plot(t_obs, obs, '.', color='r', label=lbl[1], markersize=10)
         ax_.plot((t_obs[0], t_obs[0]), (-1E6, 1E6), '--', color='k', linewidth=.8)  # DA window
         ax_.plot((t_obs[-1], t_obs[-1]), (-1E6, 1E6), '--', color='k', linewidth=.8)  # DA window
         ax_.set(xlabel='$t$ [s]', ylim=y_lims, xlim=xl)
@@ -383,20 +384,18 @@ def post_process_single(filter_ens, truth, params, filename=None, CR_file=None):
 
     # BIAS PLOTS ------------------------------------------------------------------------------------------------
     if filter_ens.bias is not None:
-        b = filter_ens.bias.hist
-        t_b = filter_ens.bias.hist_t
 
         if filter_ens.bias.name == 'ESN':
             t_wash = filter_ens.bias.washout_t
-            wash = filter_ens.bias.washout_obs
-            p_ax.plot(t_wash, wash[:, 0], '.', color='r')
-            zoomPre_ax.plot(t_wash, wash[:, 0], '.', color='r', markersize=10)
+            wash = filter_ens.bias.washout_obs[:, mic]
+            p_ax.plot(t_wash, wash, '.', color='r')
+            zoomPre_ax.plot(t_wash, wash, '.', color='r', markersize=10)
 
         b_obs = y_truth - y_mean
-        y_lims_b = [np.min(b_obs[:N_CR, 0]) * 1.1, np.max(b_obs[:N_CR, 0]) * 1.1]
+        y_lims_b = [np.min(b_obs[:N_CR]) * 1.1, np.max(b_obs[:N_CR]) * 1.1]
         for b_ax, x_lim in zip([bias_ax, biaszoom_ax], x_lims[1:]):
-            b_ax.plot(t, b_obs[:, 0], color='darkorchid', label='Observable bias', alpha=0.4, linewidth=6)
-            b_ax.plot(t_b, b[:, 0], color='darkorchid', label='ESN estimation')
+            b_ax.plot(t, b_obs, color='darkorchid', label='Observable bias', alpha=0.4, linewidth=6)
+            b_ax.plot(t_b, b, color='darkorchid', label='ESN estimation')
             b_ax.set(ylabel='Bias', xlabel='$t$ [s]', ylim=y_lims_b, xlim=x_lim)
             b_ax.legend(bbox_to_anchor=(0., 1.), loc="lower left", ncol=2)
             b_ax.plot((t_obs[0], t_obs[0]), (-1E6, 1E6), '--', color='k', linewidth=.8)  # DA window

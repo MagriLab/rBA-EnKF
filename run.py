@@ -6,6 +6,7 @@ from Util import createObservations, CR, interpolate
 from DA import dataAssimilation
 
 import matplotlib as mpl
+
 # plt.rc('text', usetex=True)
 # plt.rc('font', family='times', size=12)
 # plt.rc('legend', facecolor='white', framealpha=1, edgecolor='white')
@@ -13,14 +14,15 @@ rng = np.random.default_rng(6)
 
 path_dir = '/'.join(os.path.realpath(__file__).split('/')[:-1]) + '/'
 
+
 # ======================================================================================================================
 # ======================================================================================================================
-def main(filter_ens, truth, filter_p, results_dir="results/", save_=False):
+def main(filter_ens, truth, method, results_dir="results/", save_=False):
     os.makedirs(results_dir, exist_ok=True)
 
     # =========================  PERFORM DATA ASSIMILATION ========================== #
     filter_ens = dataAssimilation(filter_ens, truth['p_obs'], truth['t_obs'],
-                                  std_obs=truth['std_obs'], method=filter_p['filt'])
+                                  std_obs=truth['std_obs'], method=method)
     # Integrate further without assimilation as ensemble mean (if truth very long, integrate only .2s more)
     Nt_extra = 0
     if filter_ens.hist_t[-1] < truth['t'][-1]:
@@ -34,12 +36,14 @@ def main(filter_ens, truth, filter_p, results_dir="results/", save_=False):
     filter_ens.close()
 
     # ================================== SAVE DATA  ================================== #
-    parameters = dict(biasType=filter_p['biasType'], forecast_model=filter_ens.name,
+    parameters = dict(biasType=filter_ens.biasType, forecast_model=filter_ens.name,
                       true_model=truth['model'], num_DA=len(truth['t_obs']), Nt_extra=Nt_extra)
     # filter_ens = filter_ens.getOutputs()
     if save_:
-        filename = '{}{}-{}_F-{}_k{}'.format(results_dir, filter_p['filt'], truth['name'],
-                                             filter_ens.name, filter_ens.bias.k)
+        filename = '{}{}-{}_F-{}'.format(results_dir, method, truth['name'], filter_ens.name)
+        if filter_ens.bias.name == 'ESN':
+            filename += '_k{}'.format(filter_ens.bias.k)
+
         with open(filename, 'wb') as f:
             pickle.dump(parameters, f)
             pickle.dump(truth, f)
@@ -90,12 +94,10 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
                                 print('Re-init ensemble as {} = {} != {}'.format(key, b_args[0]['Bdict'][key], val))
                                 break
         if not reinit:
-
             # Remove transient to save up space
             i_transient = np.argmin(abs(truth['t'] - ensemble.t_transient))
             for key in ['y', 't', 'b']:
                 truth[key] = truth[key][i_transient:]
-
             return ensemble, truth, b_args
 
     # =============================  CREATE OBSERVATIONS ============================== #
@@ -103,23 +105,15 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
 
     if 'manual_bias' in true_p.keys():
         if true_p['manual_bias'] == 'time':
-            # Time dependent bias ------------------
-            b_true = .4 * y_true * np.sin((np.expand_dims(t_true, -1) * np.pi * 2)**2)
-            name_truth += '_timefuncBias'
+            b_true = .4 * y_true * np.sin((np.expand_dims(t_true, -1) * np.pi * 2) ** 2)
         elif true_p['manual_bias'] == 'periodic':
-            # Nonlinear bias ------------------
             b_true = 0.2 * np.max(y_true, 0) * np.cos(2 * y_true / np.max(y_true, 0))
-            name_truth += '_periodicBias'
-        elif true_p['manual_bias'] == 'cosine':
-            # Nonlinear bias ------------------
-            b_true = np.cos(y_true)
-            name_truth += '_cosBias'
         elif true_p['manual_bias'] == 'linear':
-            # Linear bias ------------------
             b_true = .1 * np.max(y_true, 0) + .3 * y_true
-            name_truth += '_linearBias'
+        elif true_p['manual_bias'] == 'cosine':
+            b_true = np.cos(y_true)
         else:
-            raise ValueError("Bias type not recognised choose: 'linear', 'cosine', 'time_func'")
+            raise ValueError("Bias type not recognised choose: 'linear', 'periodic', 'time'")
     else:
         b_true = np.zeros(1)
 
@@ -163,7 +157,7 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
     os.makedirs(folder, exist_ok=True)
 
     if bias_param is None:
-        raise ValueError('Provide bias parameters dictionary')
+        return dict()
 
     if 'L' not in bias_param.keys():
         bias_param['L'] = 10
@@ -230,7 +224,7 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
     subfigs = fig.subfigures(2, 1, height_ratios=[1, 1])
     axs_top = subfigs[0].subplots(1, 3, gridspec_kw={'width_ratios': [2, 1, 2]})
     axs_bot = subfigs[1].subplots(1, 3, gridspec_kw={'width_ratios': [2, 1, 2]})
-    norm = mpl.colors.Normalize(vmin=-5, vmax=y_ref.shape[-1]+2)
+    norm = mpl.colors.Normalize(vmin=-5, vmax=y_ref.shape[-1] + 2)
     cmap = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.magma)
 
     Nt = int(ref_ens.t_CR / truth['dt'])
@@ -239,20 +233,20 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
     i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))
     i0_r = np.argmin(abs(ref_ens.hist_t - truth['t_obs'][0]))
 
-    yt = truth['y'][i0_t-Nt:i0_t]
-    bt = truth['b'][i0_t-Nt:i0_t]
-    yr = y_ref[i0_r-Nt:i0_r]
-    tt = ref_ens.hist_t[i0_r-Nt:i0_r]
+    yt = truth['y'][i0_t - Nt:i0_t]
+    bt = truth['b'][i0_t - Nt:i0_t]
+    yr = y_ref[i0_r - Nt:i0_r]
+    tt = ref_ens.hist_t[i0_r - Nt:i0_r]
 
     axs_top[0].plot(tt, yt[:, 0], color='silver', linewidth=6, alpha=.8)
     axs_top[-1].plot(tt, bt[:, 0], color='silver', linewidth=4, alpha=.8)
     axs_bot[0].plot(t, truth['b'][:, 0], color='silver', linewidth=4, alpha=.8)
 
     xlims = [[truth['t_obs'][0] - ref_ens.t_CR, truth['t_obs'][0]],
-             [truth['t_obs'][0], truth['t_obs'][0] + ref_ens.t_CR*2]]
+             [truth['t_obs'][0], truth['t_obs'][0] + ref_ens.t_CR * 2]]
 
     for ii in range(y_ref.shape[-1]):
-        clr = cmap.to_rgba(y_ref.shape[-1]-ii)
+        clr = cmap.to_rgba(y_ref.shape[-1] - ii)
         C, R = CR(yt, yr[:, :, ii])
         axs_top[0].plot(tt, yr[:, 0, ii], color=clr)
         axs_bot[1].plot(ii, C, 'o', color=clr, markersize=4)
@@ -352,12 +346,12 @@ def get_error_metrics(results_folder):
             i1 = np.argmin(abs(t - truth['t_obs'][-1]))  # end of assimilation
 
             # cut signals to interval of interest
-            y_mean, t, y_unbiased = y_mean[i0-N_CR:i1+N_CR], t[i0-N_CR:i1+N_CR], y_unbiased[i0-N_CR:i1+N_CR]
+            y_mean, t, y_unbiased = y_mean[i0 - N_CR:i1 + N_CR], t[i0 - N_CR:i1 + N_CR], y_unbiased[i0 - N_CR:i1 + N_CR]
 
-            if ii == 0 and jj ==0:
+            if ii == 0 and jj == 0:
                 i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))  # start of assimilation
                 i1_t = np.argmin(abs(truth['t'] - truth['t_obs'][-1]))  # end of assimilation
-                y_truth, t_truth = truth['y'][i0_t-N_CR:i1_t+N_CR], truth['t'][i0_t-N_CR:i1_t+N_CR]
+                y_truth, t_truth = truth['y'][i0_t - N_CR:i1_t + N_CR], truth['t'][i0_t - N_CR:i1_t + N_CR]
                 y_truth_b = y_truth - truth['b'][i0_t - N_CR:i1_t + N_CR]
 
                 out['C_true'], out['R_true'] = CR(y_truth[-N_CR:], y_truth_b[-N_CR:])
@@ -369,7 +363,7 @@ def get_error_metrics(results_folder):
 
             # End of assimilation
             for yy, key in zip([y_mean, y_unbiased], ['_biased_DA', '_unbiased_DA']):
-                C, R = CR(y_truth[-N_CR*2:-N_CR], yy[-N_CR*2:-N_CR])
+                C, R = CR(y_truth[-N_CR * 2:-N_CR], yy[-N_CR * 2:-N_CR])
                 out['C' + key][ii, jj] = C
                 out['R' + key][ii, jj] = R
 
@@ -391,7 +385,6 @@ def get_error_metrics(results_folder):
 
     with open(results_folder + 'CR_data', 'wb') as f:
         pickle.dump(out, f)
-
 
 # def plot_train_data(truth, y_ref, t_CR, folder):
 #     # Plot training data -------------------------------------

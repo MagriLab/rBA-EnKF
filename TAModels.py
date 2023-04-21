@@ -62,8 +62,8 @@ class Model:
     def copy(self):
         return deepcopy(self)
 
-    def getObservableHist(self, Nt=0):
-        return self.getObservables(Nt)
+    def getObservableHist(self, Nt=0, **kwargs):
+        return self.getObservables(Nt, **kwargs)
 
     def printModelParameters(self):
         print('\n ------------------ {} Model Parameters ------------------ '.format(self.name))
@@ -164,7 +164,9 @@ class Model:
         # ========================== RESET ENSEMBLE HISTORY ========================== ##
         self.hist = np.array([self.psi])
 
-    def initBias(self, Bdict):
+    def initBias(self, Bdict=None):
+        if Bdict is None:
+            Bdict = dict()
         # Assign some required items
         Bdict['est_b'] = self.est_b
         Bdict['dt'] = self.dt
@@ -173,8 +175,6 @@ class Model:
         # Initialise bias. Note: self.bias is now an instance of the bias class
         yb = self.getObservables()
         self.bias = self.biasType(yb, self.t, Bdict)
-        # # Augment state matrix if you want to infer bias weights
-
         # Create bias history
         b = self.bias.getBias(yb)
         self.bias.updateHistory(b, self.t, reset=True)
@@ -427,7 +427,8 @@ class Rijke(Model):
 
     def getObservables(self, Nt=1, loc=None, velocity=False):
         if loc is None:
-            loc = np.expand_dims(self.x_mic, axis=1)
+            loc = self.x_mic
+        loc = np.expand_dims(loc, axis=1)
         om = np.array([self.jpiL])
 
         eta = self.hist[-Nt:, :self.Nm, :]

@@ -66,8 +66,7 @@ def createObservations(classParams=None):
 
         if t_obs[-1] > t_max:
             idx = np.argmin(abs(t_obs - t_max))
-            t_obs = t_obs[:idx + 1]
-            p_obs = p_obs[:idx + 1]
+            t_obs, p_obs = [yy[:idx + 1] for yy in [t_obs, p_obs]]
             print('Data too long. Redefine t_max = ', t_max)
 
         return p_obs, t_obs, 'Wave'
@@ -99,7 +98,7 @@ def createObservations(classParams=None):
     if len(np.shape(p_obs)) > 2:
         p_obs = np.squeeze(p_obs, axis=-1)
 
-    return p_obs, case.hist_t, name.split('Truth_')[-1]
+    return p_obs, case.hist_t, name.split('Truth_')[-1], case
 
 
 def RK4(t, q0, func, *kwargs):
