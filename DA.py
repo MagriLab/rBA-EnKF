@@ -92,6 +92,7 @@ def dataAssimilation(ensemble, obs, t_obs, std_obs=0.05, method='EnSRKF'):
 
         if len(ensemble.hist_t) != len(ensemble.hist):
             raise Exception('something went wrong')
+
         # ------------------------------ FORECAST TO NEXT OBSERVATION ---------------------- #
         # next observation index
         ti += 1
@@ -121,9 +122,6 @@ def forecastStep(case, Nt, averaged=False, alpha=None):
         Returns:
             case: updated case forecast Nt time steps
     """
-    # TODO: modify the forecast so that Process 1 for case and process 2 for bias
-    #  [might not be doable on washout]
-
     # Forecast ensemble and update the history
     psi, t = case.timeIntegrate(Nt=Nt, averaged=averaged, alpha=alpha)
     case.updateHistory(psi, t)
@@ -149,7 +147,7 @@ def analysisStep(case, d, Cdd, filt='EnSRKF', get_cost=False):
     """
 
     Af = case.psi.copy()  # state matrix [modes + params] x m
-    M = case.M
+    M = case.M.copy()
 
     if case.est_p and not case.activate_parameter_estimation:
         Af = Af[:-len(case.est_p), :]
@@ -263,7 +261,7 @@ def EnSRKF(Af, d, Cdd, M, get_cost=False):
 
     cost = np.array([None] * 4)
     if np.isreal(Aa).all():
-        if get_cost:
+        if get_cost:  # Compute cost function terms
             Ya = Aa[-len(d):]
             Wdd = linalg.inv(Cdd)
             Cpp = np.dot(Psi_f, Psi_f.T)
@@ -318,7 +316,7 @@ def EnKF(Af, d, Cdd, M, get_cost=False):
 
     cost = np.array([None] * 4)
     if np.isreal(Aa).all():
-        if get_cost:
+        if get_cost:  # Compute cost function terms
             Ya = Aa[-len(d):]
             Cpp = np.dot(Psi_f, Psi_f.T)
             Wdd = linalg.inv(Cdd)
@@ -382,7 +380,7 @@ def rBA_EnKF(Af, d, Cdd, Cbb, k, M, b, J, get_cost=False):
     # Compute cost function terms (this could be commented out to increase speed)
     cost = np.array([None] * 4)
     if np.isreal(Aa).all():
-        if get_cost:
+        if get_cost:  # Compute cost function terms
             ba = b + np.dot(J, np.mean(np.dot(M, Aa) - Q, -1))
             Ya = np.dot(M, Aa) + np.expand_dims(ba, -1)
             Wdd = linalg.inv(Cdd)

@@ -1,6 +1,6 @@
 import TAModels
 import Bias
-from run import main, createESNbias, createEnsemble
+from run import main, create_ESN_train_dataset, createEnsemble
 from plotResults import *
 
 # %% ========================== SELECT LOOP PARAMETERS ================================= #
@@ -92,7 +92,7 @@ if __name__ == '__main__':
                 bias_params['augment_data'] = augment
                 bias_params['L'] = L
 
-                filter_params['Bdict'] = createESNbias(*args, bias_param=bias_params)  # reset bias
+                filter_params['Bdict'] = create_ESN_train_dataset(,  # reset bias
                 filter_ens.initBias(filter_params['Bdict'])
 
                 filter_ens.bias.k = k
@@ -114,7 +114,7 @@ if __name__ == '__main__':
             blank_ens = ensemble.copy()
             # Reset ESN
             bias_params['L'] = L
-            filter_params['Bdict'] = createESNbias(*args, bias_param=bias_params)
+            filter_params['Bdict'] = create_ESN_train_dataset(,
             blank_ens.initBias(filter_params['Bdict'])
             for std in stds:
                 # Reset std

@@ -1,15 +1,13 @@
 import os
 import numpy as np
-import pylab as plt
 import pickle
 from Util import createObservations, CR, interpolate
 from DA import dataAssimilation
 
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 
-# plt.rc('text', usetex=True)
-# plt.rc('font', family='times', size=12)
-# plt.rc('legend', facecolor='white', framealpha=1, edgecolor='white')
+
 rng = np.random.default_rng(6)
 
 path_dir = '/'.join(os.path.realpath(__file__).split('/')[:-1]) + '/'
@@ -137,7 +135,7 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
     # %% =============================  DEFINE BIAS ======================================== #
     if filter_p['biasType'].name == 'ESN':
         args = (filter_p, forecast_p['model'], truth, working_dir)
-        filter_p['Bdict'] = createESNbias(*args, bias_param=bias_p)
+        filter_p['Bdict'] = create_ESN_train_dataset(*args, bias_param=bias_p)
     else:
         args = (None,)
 
@@ -153,21 +151,20 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
 
 # ======================================================================================================================
 # ======================================================================================================================
-def createESNbias(filter_p, model, truth, folder, bias_param=None):
-    os.makedirs(folder, exist_ok=True)
+def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param=None):
 
-    if bias_param is None:
+    if bias_param is None: # If no bias estimation, return empty dic
         return dict()
-
-    if 'L' not in bias_param.keys():
-        bias_param['L'] = 10
-
+    # ------------------------------------------------------------------------
+    os.makedirs(folder, exist_ok=True)
     bias_p = bias_param.copy()
+    if 'L' not in bias_p.keys():
+        bias_p['L'] = 10
     train_params = bias_p['train_params'].copy()
     train_params['m'] = bias_p['L']
 
-    # Compute reference bias. Create an ensemble of training data
-    ref_ens = model(train_params, train_params)
+    # ========================  Multi-parameter training approach ====================
+    ref_ens = forecast_model(train_params, train_params)
     try:
         name_train = folder + 'Truth_{}_{}'.format(ref_ens.name, ref_ens.law)
     except:
@@ -176,7 +173,9 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
     for k in ref_ens.params:
         name_train += '_{}{}'.format(k, getattr(ref_ens, k))
     name_train += '_std{:.2}_m{}_{}'.format(ref_ens.std_a, ref_ens.m, ref_ens.alpha_distr)
-    # Load or create reference ensemble (multi-parameter solution)
+    bias_p['filename'] = folder + truth['name'] + '_' + name_train.split('Truth_')[-1] + '_bias'
+
+    # Load or create reference ensemble ---------------------------------------------
     rerun = True
     print(name_train)
     if os.path.isfile(name_train):
@@ -193,18 +192,24 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
         with open(name_train, 'wb') as f:
             pickle.dump(ref_ens, f)
 
+    # Create the synthetic bias as innovations ------------------------------------
     y_ref, lbl = ref_ens.getObservableHist(Nt=len(truth['t'])), ref_ens.obsLabels
     t = ref_ens.hist_t[:len(truth['t'])]
 
     if len(truth['y'].shape) < len(y_ref.shape):
-        biasData = np.expand_dims(truth['y'], -1) - y_ref  # [Nt x Nmic x L]
+        bias_p['trainData'] = np.expand_dims(truth['y'], -1) - y_ref  # [Nt x Nmic x L]
     else:
-        biasData = truth['y'] - y_ref  # [Nt x Nmic x L]
+        bias_p['trainData'] = truth['y'] - y_ref  # [Nt x Nmic x L]
 
-    # provide data for washout before first observation
+    # TODO: clean data. 1. remove FPs, 2. maximize correlation
+
+
+
+
+
+    # Add washout ----------------------------------------------------------------
     if 'start_ensemble_forecast' not in filter_p.keys():
         filter_p['start_ensemble_forecast'] = 2
-
     tol = 1e-5
     i1 = truth['t_obs'][0] - truth['dt_obs'] * filter_p['start_ensemble_forecast']
     i1 = int(np.where(abs(truth['t'] - i1) < tol)[0])
@@ -212,65 +217,12 @@ def createESNbias(filter_p, model, truth, folder, bias_param=None):
     if i0 < 0:
         min_t = (bias_p['N_wash'] * bias_p['upsample'] + filter_p['kmeas']) * (t[1] - t[0])
         raise ValueError('increase t_start to > t_wash + dt_a = {}'.format(min_t))
-
-    # create bias dictionary
-    bias_p['trainData'] = biasData
     bias_p['washout_obs'] = truth['y'][i0:i1 + 1]
     bias_p['washout_t'] = truth['t'][i0:i1 + 1]
-    bias_p['filename'] = folder + truth['name'] + '_' + name_train.split('Truth_')[-1] + '_bias'
 
-    # Plot training data -------------------------------------
-    fig, axs = plt.subplots(figsize=(12, 4.5), layout='constrained')
-    subfigs = fig.subfigures(2, 1, height_ratios=[1, 1])
-    axs_top = subfigs[0].subplots(1, 3, gridspec_kw={'width_ratios': [2, 1, 2]})
-    axs_bot = subfigs[1].subplots(1, 3, gridspec_kw={'width_ratios': [2, 1, 2]})
-    norm = mpl.colors.Normalize(vmin=-5, vmax=y_ref.shape[-1] + 2)
-    cmap = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.magma)
+    # Plot  & savetraining dataset --------------------------------------------------
+    plot_train_data(truth, ref_ens, path_dir + folder)
 
-    Nt = int(ref_ens.t_CR / truth['dt'])
-    L = y_ref.shape[-1]
-
-    i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))
-    i0_r = np.argmin(abs(ref_ens.hist_t - truth['t_obs'][0]))
-
-    yt = truth['y'][i0_t - Nt:i0_t]
-    bt = truth['b'][i0_t - Nt:i0_t]
-    yr = y_ref[i0_r - Nt:i0_r]
-    tt = ref_ens.hist_t[i0_r - Nt:i0_r]
-
-    axs_top[0].plot(tt, yt[:, 0], color='silver', linewidth=6, alpha=.8)
-    axs_top[-1].plot(tt, bt[:, 0], color='silver', linewidth=4, alpha=.8)
-    axs_bot[0].plot(t, truth['b'][:, 0], color='silver', linewidth=4, alpha=.8)
-
-    xlims = [[truth['t_obs'][0] - ref_ens.t_CR, truth['t_obs'][0]],
-             [truth['t_obs'][0], truth['t_obs'][0] + ref_ens.t_CR * 2]]
-
-    for ii in range(y_ref.shape[-1]):
-        clr = cmap.to_rgba(y_ref.shape[-1] - ii)
-        C, R = CR(yt, yr[:, :, ii])
-        axs_top[0].plot(tt, yr[:, 0, ii], color=clr)
-        axs_bot[1].plot(ii, C, 'o', color=clr, markersize=4)
-        axs_top[1].plot(ii, R, 'x', color=clr, markersize=4)
-        norm_bias = (truth['y'][:, 0] - y_ref[:, 0, ii])
-        axs_bot[-1].plot(t, norm_bias, color=clr)
-        axs_top[-1].plot(t, norm_bias, color=clr)
-
-    axs_top[0].legend(['Truth'], bbox_to_anchor=(0., 0.25), loc="upper left")
-    axs_top[0].set(xlabel='$t$', ylabel='$y$', xlim=xlims[0])
-    axs_bot[1].set(xlabel='$l$', ylabel='Correlation')
-    axs_top[1].set(xlabel='$l$', ylabel='RMS error')
-    axs_top[-1].set(xlabel='$t$', ylabel='$b$', xlim=xlims[0])
-    axs_bot[0].set(xlabel='$t$', ylabel='$b$', xlim=xlims[-1])
-    axs_bot[-1].set(xlabel='$t$', ylabel='$b$', xlim=xlims[-1])
-    axs_top[0].plot(truth['t'], truth['y'][:, 0], color='silver', linewidth=6, alpha=.8)
-    for ax_ in [axs_bot[1], axs_top[1]]:
-        x0, x1 = ax_.get_xlim()
-        y0, y1 = ax_.get_ylim()
-        ax_.set_aspect((x1 - x0) / (y1 - y0))
-
-    os.makedirs(path_dir + folder, exist_ok=True)
-    plt.savefig(path_dir + folder + 'L{}_training_data.svg'.format(L), dpi=350)
-    plt.close()
     return bias_p
 
 
@@ -386,25 +338,77 @@ def get_error_metrics(results_folder):
     with open(results_folder + 'CR_data', 'wb') as f:
         pickle.dump(out, f)
 
-# def plot_train_data(truth, y_ref, t_CR, folder):
-#     # Plot training data -------------------------------------
-#     fig, ax = plt.subplots(1, 3, figsize=(15, 3.5), layout='constrained')
-#     norm = mpl.colors.Normalize(vmin=-5, vmax=y_ref.shape[-1])
-#     cmap = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.magma)
-#     fig.suptitle('Training data')
-#     ax[0].plot(truth['t'], truth['y'][:, 0], color='silver', linewidth=6, alpha=.8)
-#     Nt = int(t_CR / truth['dt'])
-#
-#     L = y_ref.shape[-1]
-#     for ii in range(y_ref.shape[-1]):
-#         C, R = CR(truth['y'][-Nt:], y_ref[-Nt:, :, ii])
-#         line = ax[0].plot(truth['t'], y_ref[:, 0, ii], color=cmap.to_rgba(ii))
-#         ax[1].plot(ii, C, 'o', color=cmap.to_rgba(ii))
-#         ax[2].plot(ii, R, 'x', color=cmap.to_rgba(ii))
-#     ax[0].legend(['Truth'], bbox_to_anchor=(0., 1.25), loc="upper left")
-#     ax[0].set(xlabel='$t$', ylabel='y', xlim=[truth['t'][-1] - t_CR, truth['t'][-1]])
-#     ax[1].set(xlabel='$l$', ylabel='Correlation')
-#     ax[2].set(xlabel='$l$', ylabel='RMS error')
-#     ax[0].plot(truth['t'], truth['y'][:, 0], color='silver', linewidth=6, alpha=.8)
-#     plt.savefig(folder + 'L{}_training_data.svg'.format(L), dpi=350)
-#     plt.close()
+
+
+def plot_train_data(truth, train_ens, folder):
+
+    y_ref = train_ens.getObservableHist(Nt=len(truth['t']))
+    t = train_ens.hist_t[:len(truth['t'])]
+
+    Nt = int(train_ens.t_CR / truth['dt'])
+    i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))
+    i0_r = np.argmin(abs(train_ens.hist_t - truth['t_obs'][0]))
+    t_CR = train_ens.t_CR
+
+    yt = truth['y'][i0_t - Nt:i0_t]
+    bt = truth['b'][i0_t - Nt:i0_t]
+    yr = y_ref[i0_r - Nt:i0_r]
+    tt = train_ens.hist_t[i0_r - Nt:i0_r]
+
+    RS = []
+    for ii in range(y_ref.shape[-1]):
+        R = CR(yt, yr[:, :, ii])[1]
+        RS.append(R)
+
+
+    # Plot training data -------------------------------------
+    fig = plt.figure(figsize=[12, 4.5], layout="constrained")
+
+    subfigs = fig.subfigures(2, 1, height_ratios=[1, 1])
+    axs_top = subfigs[0].subplots(1, 2)
+    axs_bot = subfigs[1].subplots(1, 2)
+
+    true_RMS = CR(yt, yt - bt)[1]
+    norm = mpl.colors.Normalize(vmin=true_RMS, vmax=1.5)
+
+    cmap = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
+    cmap.set_clim(true_RMS, 1.5)
+
+    axs_top[0].plot(tt, yt[:, 0], color='silver', linewidth=6, alpha=.8)
+    axs_top[-1].plot(tt, bt[:, 0], color='silver', linewidth=4, alpha=.8)
+
+    xlims = [[truth['t_obs'][0] - t_CR, truth['t_obs'][0]],
+             [truth['t_obs'][0], truth['t_obs'][0] + t_CR * 2]]
+
+    for ii in range(y_ref.shape[-1]):
+        clr = cmap.to_rgba(RS[ii])
+        axs_top[0].plot(tt, yr[:, 0, ii], color=clr)
+        norm_bias = (truth['y'][:, 0] - y_ref[:, 0, ii])
+        axs_bot[-1].plot(t, norm_bias, color=clr)
+        axs_top[-1].plot(t, norm_bias, color=clr)
+
+    axs_top[0].plot(tt, yt[:, 0], color='silver', linewidth=4, alpha=.5)
+    axs_top[-1].plot(tt, bt[:, 0], color='silver', linewidth=4, alpha=.5)
+
+    max_y = np.max(abs(yt[:, 0] - bt[:, 0]))
+
+    axs_bot[0].plot(t, truth['b'][:, 0] / max_y * 100, color='silver', linewidth=4, alpha=.5)
+
+    axs_top[0].legend(['Truth'], bbox_to_anchor=(0., 0.25), loc="upper left")
+    axs_top[1].legend(['True RMS $={0:.3f}$'.format(true_RMS)], bbox_to_anchor=(0., 0.25), loc="upper left")
+
+    axs_top[0].set(xlabel='$t$', ylabel='$\\eta$', xlim=xlims[0])
+    axs_top[-1].set(xlabel='$t$', ylabel='$b$', xlim=xlims[0])
+    axs_bot[0].set(xlabel='$t$', ylabel='$b$ normalized [\\%]', xlim=xlims[-1])
+    axs_bot[-1].set(xlabel='$t$', ylabel='$b$', xlim=xlims[-1])
+
+    clb = fig.colorbar(cmap, ax=axs_bot, orientation='vertical', extend='max')
+    clb.ax.set_title('$\\mathrm{RMS}$')
+    clb = fig.colorbar(cmap, ax=axs_top, orientation='vertical', extend='max')
+    clb.ax.set_title('$\\mathrm{RMS}$')
+
+    os.makedirs(folder, exist_ok=True)
+
+    L = y_ref.shape[-1]
+    plt.savefig(folder + 'L{}_training_data.svg'.format(L), dpi=350)
+    plt.close()

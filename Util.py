@@ -91,8 +91,8 @@ def createObservations(classParams=None):
     psi, t = case.timeIntegrate(Nt=int(t_max / case.dt))
     case.updateHistory(psi, t)
     case.close()
-    with open(name + '.lzma', 'wb') as f:
-        dump(case, f)
+    with open(name, 'wb') as f:
+        pickle.dump(case, f)
     # Retrieve observables
     p_obs = case.getObservableHist()
     if len(np.shape(p_obs)) > 2:

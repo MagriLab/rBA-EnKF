@@ -1,6 +1,6 @@
 import TAModels
 import Bias
-from run import main, createESNbias, createEnsemble
+from run import main, create_ESN_train_dataset, createEnsemble
 from plotResults import *
 
 folder = 'results/Lorenz_0131_good/'

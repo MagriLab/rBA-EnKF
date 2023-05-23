@@ -230,7 +230,7 @@ class Model:
     @staticmethod
     def forecast(y0, fun, t, params, alpha=None):
         # SOLVE IVP ========================================
-        # out = solve_ivp(fun, t_span=(t[0], t[-1]), y0=y0, t_eval=t, method='RK45', args=(params, alpha))
+        # out = solve_ivp(fun, t_span=(t[0], t[-1]), y0=y0, t_eval=t, method='RK45', esn_args=(params, alpha))
         # psi = out.y.T
         # ODEINT =========================================== THIS WORKS AS IF HARD CODED
         # psi = odeint(fun, y0, t_interp, (params,))
