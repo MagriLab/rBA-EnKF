@@ -5,7 +5,7 @@ Data Assimilation codes in python
 Available filters:
 - EnKF
 - EnSRKF
-- Bias-aware EnKF
+- Regularized bias-aware EnKF
 
 Available models:
 - Rijke tube (dimensional with Galerkin discretisation)
@@ -13,3 +13,4 @@ Available models:
  
 Available bias estimator:
 - Echo State Network
+- NoBias
