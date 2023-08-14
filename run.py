@@ -19,7 +19,7 @@ def main(filter_ens, truth, method, results_dir="results/", save_=False):
     os.makedirs(results_dir, exist_ok=True)
 
     # =========================  PERFORM DATA ASSIMILATION ========================== #
-    filter_ens = dataAssimilation(filter_ens, truth['p_obs'], truth['t_obs'],
+    filter_ens = dataAssimilation(filter_ens, truth['y_obs'], truth['t_obs'],
                                   std_obs=truth['std_obs'], method=method)
     # Integrate further without assimilation as ensemble mean (if truth very long, integrate only .2s more)
     Nt_extra = 0
@@ -139,7 +139,7 @@ def create_truth(true_p, filter_p):
     dt_t = t_true[1] - t_true[0]
     obs_idx = np.arange(round(filter_p['t_start'] / dt_t),
                         round(filter_p['t_stop'] / dt_t) + 1, filter_p['kmeas'])
-    t_obs = t_true[obs_idx]
+
     q = np.shape(y_true)[1]
     if 'std_obs' not in true_p.keys():
         true_p['std_obs'] = 0.01
@@ -147,18 +147,26 @@ def create_truth(true_p, filter_p):
     if 'normalized_noise' in true_p.keys() and true_p['normalized_noise']:
         Cdd = np.eye(q) * true_p['std_obs'] ** 2
         noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
-        obs = y_true[obs_idx] * (1. + noise)
+        y_noise = y_true * (1. + noise)
     else:
-        mean_y = np.mean(abs(y_true[obs_idx]))
+        mean_y = np.mean(abs(y_true))
         Cdd = np.eye(q) * (true_p['std_obs'] * mean_y) ** 2
         noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
-        obs = y_true[obs_idx] + noise
+        y_noise = y_true + noise
 
+    # Select obs_idx only
+    t_obs = t_true[obs_idx]
+    y_obs = y_noise[obs_idx]
+
+    # Compute signal-to-noise ratio
+    m = np.mean(y_noise, 0)
+    sd = np.std(y_noise, axis=0, ddof=0)
+    SNR = np.where(sd == 0, 0, m/sd)
 
     truth = dict(y=y_true, t=t_true, b=b_true, dt=dt_t,
-                 t_obs=t_obs, p_obs=obs, dt_obs=t_obs[1] - t_obs[0],
+                 t_obs=t_obs, y_obs=y_obs, dt_obs=t_obs[1] - t_obs[0],
                  true_params=true_p, name=name_truth,
-                 model=true_p['model'], std_obs=true_p['std_obs'])
+                 model=true_p['model'], std_obs=true_p['std_obs'], SNR=SNR)
     return truth
 
 

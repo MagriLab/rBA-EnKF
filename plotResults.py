@@ -291,7 +291,7 @@ def post_process_WhyAugment(results_dir, k_plot=None, J_plot=None, figs_dir=None
 
 def post_process_single(filter_ens, truth, params, filename=None, mic=0):
 
-    t_obs, obs = truth['t_obs'], truth['p_obs']
+    t_obs, obs = truth['t_obs'], truth['y_obs']
 
     num_DA_blind = filter_ens.num_DA_blind
     num_SE_only = filter_ens.num_SE_only
@@ -803,7 +803,7 @@ def plot_Rijke_animation(folder, figs_dir):
 
     y_BB_tt = filter_ens_BB.getObservableHist()[:, 0]
     y_t_tt = truth['y'][:, 0]
-    y_obs_tt = truth['p_obs'][:, 0]
+    y_obs_tt = truth['y_obs'][:, 0]
     pressure_legend = ['Truth', 'Data', 'State + bias  BA', 'State est. BA', 'State est.']
 
     def animate1(ai):
@@ -822,7 +822,7 @@ def plot_Rijke_animation(folder, figs_dir):
         # # Plot observables
         # if any(abs(t_gif[ii] - truth['t_obs']) < 1E-6):
         #     jj = np.argmin(abs(t_gif[ai] - truth['t_obs']))
-        #     ax1.plot(locs_obs, truth['p_obs'][jj], 'o', color='red', markersize=4,
+        #     ax1.plot(locs_obs, truth['y_obs'][jj], 'o', color='red', markersize=4,
         #              markerfacecolor=None, markeredgewidth=2)
         #     # for yy, c in zip([y_BA_obs[ai], y_BB_obs[ai]], ['lightseagreen', 'orange']):
         #     #     y_mean, y_std = np.mean(yy, -1), np.std(yy, -1)
