@@ -15,7 +15,7 @@ if __name__ == '__main__':
     figs_dir = path_dir + '/paper_figs/'
 
     # %% ============================= SELECT TRUE AND FORECAST MODELS ================================= #
-    run_whyAugment, run_loopParams = 1, 0
+    run_whyAugment, run_loopParams = 0, 0
     plot_whyAugment, plot_loopParams = 0, 1
 
     if run_whyAugment or run_loopParams:

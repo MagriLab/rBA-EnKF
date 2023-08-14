@@ -2,31 +2,32 @@
 if __name__ == '__main__':
     import TAModels
     import Bias
-    from run import main, create_ESN_train_dataset, createEnsemble
+    from run import main, create_ESN_train_dataset, createEnsemble, create_truth
     from plotResults import *
     import os as os
 
     bias_form = 'periodic'  # Options: linear, periodic, time
-    run_loopParams, plot_loopParams = 1, 1
-    run_optimal, plot_optimal = 1, 1
+    run_loopParams, plot_loopParams = 0, 0
+    run_optimal, plot_optimal = 0, 0
+    run_noise, plot_noise = 1, 1
 
     for mm in [50]:
-        Ls = np.linspace(10, 100, 10, dtype=int)
+        Ls = np.linspace(10, 100, 5, dtype=int)
         if bias_form == 'time':
             ks = np.linspace(0.25, 4.75, 10)
         else:
-            ks = np.linspace(0., 10., 41)
+            ks = np.linspace(0., 10., 21)
         stds = [.25]
+        noise_levels = (0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5)
 
-        # %% ========================== SELECT WORKING PATHS ================================= #
+        # %% ================================ SELECT WORKING PATHS ================================= #
         folder = 'results/Rijke_final_{}/'.format(bias_form)
         path_dir = os.path.realpath(__file__).split('main')[0]
         # os.chdir('/mscott/an553/')  # set working directory to mscott
 
         loopParams_folder = folder + 'm{}/results_loopParams/'.format(mm)
         optimal_folder = folder + 'm{}/results_optimal/'.format(mm)
-
-
+        noise_folder = folder + 'm{}/results_noise_mean/'.format(mm)
 
         # %% ============================= SELECT TRUE AND FORECAST MODELS ================================= #
         true_params = {'model': TAModels.Rijke,
@@ -84,8 +85,8 @@ if __name__ == '__main__':
                                                filter_params, bias_params,
                                                working_dir=folder, filename=name)
 
+        # -------------------------------------------------------------------------------------------------------------
         if run_loopParams:
-            # =========================================== RUN LOOP ==========================================
             for std in stds:
                 blank_ens = ensemble.copy()
                 # Reset std
@@ -99,24 +100,20 @@ if __name__ == '__main__':
                     bias_params['L'] = L
                     filter_params['Bdict'] = create_ESN_train_dataset(*args, bias_param=bias_params)
                     blank_ens.initBias(filter_params['Bdict'])
-
                     results_folder = std_folder + 'L{}/'.format(L)
+
                     for k in ks:  # Reset gamma value
                         filter_ens = blank_ens.copy()
                         filter_ens.bias.k = k
                         # Run simulation
-                        main(filter_ens, truth, filter_params, results_dir=results_folder, save_=True)
+                        main(filter_ens, truth, 'rBA_EnKF', results_dir=results_folder, save_=True)
                 get_error_metrics(std_folder)
-        # -------------------------------------------------------------------------------------------------------------
         if plot_loopParams:
             if not os.path.isdir(loopParams_folder):
                 raise ValueError('results_loopParams not run')
 
             figs_dir = path_dir + loopParams_folder
             post_process_loopParams(loopParams_folder, k_plot=(None,), figs_dir=figs_dir)
-
-
-        # -------------------------------------------------------------------------------------------------------------
         # -------------------------------------------------------------------------------------------------------------
         if run_optimal:
             blank_ens = ensemble.copy()
@@ -147,10 +144,44 @@ if __name__ == '__main__':
                 filter_ens.initBias(Bdict)
             filter_ens.bias.k = k
             main(filter_ens, truth, 'rBA_EnKF', results_dir=optimal_folder, save_=True)
-
-        # ========================================================================================================
         if plot_optimal:
             if not os.path.isdir(optimal_folder):
                 raise ValueError('results_loopParams not run')
             figs_dir = path_dir + optimal_folder
             plot_Rijke_animation(optimal_folder, figs_dir)
+        # -------------------------------------------------------------------------------------------------------------
+        if run_noise:
+            args_list = list(args)
+            std = 0.25
+            if bias_form == 'linear':
+                L, k = 100, 1.75
+            elif bias_form == 'periodic':
+                L, k = 60, 2.75
+            elif bias_form == 'time':
+                L, k = 10,  1.25
+
+            blank_ens = ensemble.copy()
+            # Reset std
+            blank_ens.psi = blank_ens.addUncertainty(np.mean(blank_ens.psi, 1), std, blank_ens.m, method='normal')
+            blank_ens.hist[-1] = blank_ens.psi
+            blank_ens.std_psi, blank_ens.std_a = std, std
+            # Reset bias L
+            bias_params['L'] = L
+
+            for noise_level in noise_levels:
+                filter_ens = blank_ens.copy()
+                results_folder = noise_folder + 'noise{}/'.format(noise_level)
+                true_params['std_obs'] = noise_level
+                truth = create_truth(true_params, filter_params)
+                # Reset ESN
+                args_list[2] = truth
+                filter_params['Bdict'] = create_ESN_train_dataset(*tuple(args_list), bias_param=bias_params)
+                filter_ens.initBias(filter_params['Bdict'])
+                filter_ens.bias.k = k
+                # run simulation
+                main(filter_ens, truth, 'rBA_EnKF', results_dir=results_folder, save_=True)
+
+        if plot_noise:
+            post_process_noise(noise_folder, noise_levels=noise_levels)
+
+

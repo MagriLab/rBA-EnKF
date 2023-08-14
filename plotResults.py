@@ -73,6 +73,83 @@ def post_process_loopParams(results_dir, k_plot=(None,), figs_dir=None, k_max=10
                                 post_process_single(filter_ens, truth, params, filename=filename)
 
 
+def post_process_noise(results_dir, noise_levels=(None,), figs_dir=None):
+    if results_dir[-1] != '/':
+        results_dir += '/'
+    if figs_dir is None:
+        figs_dir = results_dir + 'figs/'
+    os.makedirs(figs_dir, exist_ok=True)
+
+    C_dict = dict(biased_DA=[],
+                  unbiased_DA=[],
+                  biased_post=[],
+                  unbiased_post=[],
+                  )
+    R_dict = C_dict.copy()
+    files = []
+
+    flag = True
+    for noise_level in noise_levels:
+
+        noise_dir = results_dir + '/noise{}/'.format(noise_level)
+        filename = os.listdir(noise_dir)[0]
+        files.append(filename)
+
+        with open(noise_dir + filename, 'rb') as f:
+            params = pickle.load(f)
+            truth = pickle.load(f)
+            filter_ens = pickle.load(f)
+
+        filename = '{}noise_{:.2f}'.format(figs_dir, noise_level)
+        post_process_single(filter_ens, truth, params, filename=filename)
+
+
+        # Compute biased and unbiased signals
+        y, t = filter_ens.getObservableHist(), filter_ens.hist_t
+        b, t_b = filter_ens.bias.hist, filter_ens.bias.hist_t
+        y_mean = np.mean(y, -1)
+
+        # Unbiased signal error
+        if hasattr(filter_ens.bias, 'upsample'):
+            y_unbiased = y_mean[::filter_ens.bias.upsample] + b
+            y_unbiased = interpolate(t_b, y_unbiased, t)
+        else:
+            y_unbiased = y_mean + b
+
+        N_CR = int(filter_ens.t_CR // filter_ens.dt)  # Length of interval to compute correlation and RMS
+        i0, i1 = [np.argmin(abs(t - tt)) for tt in [truth['t_obs'][0], truth['t_obs'][-1]]]  # start/end assimilation
+        # cut signals to interval of interest
+        y_mean, t, y_unbiased = [xx[i0 - N_CR:i1 + N_CR] for xx in [y_mean, t, y_unbiased]]
+
+        if flag:
+            i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))  # start of assimilation
+            i1_t = np.argmin(abs(truth['t'] - truth['t_obs'][-1]))  # end of assimilation
+            y_truth, t_truth = truth['y'][i0_t - N_CR:i1_t + N_CR], truth['t'][i0_t - N_CR:i1_t + N_CR]
+            y_truth_b = y_truth - truth['b'][i0_t - N_CR:i1_t + N_CR]
+
+            C_true, R_true = CR(y_truth[-N_CR:], y_truth_b[-N_CR:])
+            C_pre, R_pre = CR(y_truth[:N_CR], y_mean[:N_CR])
+            flag = False
+
+        # End of assimilation
+        for yy, key in zip([y_mean, y_unbiased], ['biased_DA', 'unbiased_DA']):
+            C, R = CR(y_truth[-N_CR * 2:-N_CR], yy[-N_CR * 2:-N_CR])
+            C_dict[key].append(C)
+            R_dict[key].append(C)
+
+        # After Assimilation
+        for yy, key in zip([y_mean, y_unbiased], ['biased_post', 'unbiased_post']):
+            C, R = CR(y_truth[-N_CR:], yy[-N_CR:])
+            C_dict[key].append(C)
+            R_dict[key].append(C)
+
+    # Plot results
+
+
+
+
+
+
 def post_process_WhyAugment(results_dir, k_plot=None, J_plot=None, figs_dir=None):
     if figs_dir is None:
         figs_dir = results_dir + 'figs/'

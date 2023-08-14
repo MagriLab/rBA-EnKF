@@ -363,7 +363,8 @@ def rBA_EnKF(Af, d, Cdd, Cbb, k, M, b, J, get_cost=False):
     
     # Create an ensemble of observations
     D = rng.multivariate_normal(d, Cdd, Nm).transpose()
-    B = np.repeat(np.expand_dims(b, 1), Nm, axis=1)
+    B = rng.multivariate_normal(b, Cbb, Nm).transpose()
+    # B = np.repeat(np.expand_dims(b, 1), Nm, axis=1)
 
     Y = Q + B
 

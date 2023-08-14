@@ -99,6 +99,26 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
             return ensemble, truth, b_args
 
     # =============================  CREATE OBSERVATIONS ============================== #
+    truth = create_truth(true_p, filter_p)
+
+    # %% =============================  DEFINE BIAS ======================================== #
+    if filter_p['biasType'].name == 'ESN':
+        args = (filter_p, forecast_p['model'], truth, working_dir)
+        filter_p['Bdict'] = create_ESN_train_dataset(*args, bias_param=bias_p)
+    else:
+        args = (None,)
+
+    # ===============================  INITIALISE ENSEMBLE  =============================== #
+    ensemble = forecast_p['model'](forecast_p, filter_p)
+    with open(results_dir + filename, 'wb') as f:
+        pickle.dump(ensemble, f)
+        pickle.dump(truth, f)
+        pickle.dump(args, f)
+
+    return ensemble, truth, args
+
+
+def create_truth(true_p, filter_p):
     y_true, t_true, name_truth = createObservations(true_p)
 
     if 'manual_bias' in true_p.keys():
@@ -123,37 +143,30 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
     q = np.shape(y_true)[1]
     if 'std_obs' not in true_p.keys():
         true_p['std_obs'] = 0.01
-    Cdd = np.eye(q) * true_p['std_obs'] ** 2
 
-    noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
-    obs = y_true[obs_idx] * (1. + noise)
+    if 'normalized_noise' in true_p.keys() and true_p['normalized_noise']:
+        Cdd = np.eye(q) * true_p['std_obs'] ** 2
+        noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
+        obs = y_true[obs_idx] * (1. + noise)
+    else:
+        mean_y = np.mean(abs(y_true[obs_idx]))
+        Cdd = np.eye(q) * (true_p['std_obs'] * mean_y) ** 2
+        noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
+        obs = y_true[obs_idx] + noise
+
+
     truth = dict(y=y_true, t=t_true, b=b_true, dt=dt_t,
                  t_obs=t_obs, p_obs=obs, dt_obs=t_obs[1] - t_obs[0],
                  true_params=true_p, name=name_truth,
                  model=true_p['model'], std_obs=true_p['std_obs'])
-
-    # %% =============================  DEFINE BIAS ======================================== #
-    if filter_p['biasType'].name == 'ESN':
-        args = (filter_p, forecast_p['model'], truth, working_dir)
-        filter_p['Bdict'] = create_ESN_train_dataset(*args, bias_param=bias_p)
-    else:
-        args = (None,)
-
-    # ===============================  INITIALISE ENSEMBLE  =============================== #
-    ensemble = forecast_p['model'](forecast_p, filter_p)
-    with open(results_dir + filename, 'wb') as f:
-        pickle.dump(ensemble, f)
-        pickle.dump(truth, f)
-        pickle.dump(args, f)
-
-    return ensemble, truth, args
+    return truth
 
 
 # ======================================================================================================================
 # ======================================================================================================================
 def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param=None):
 
-    if bias_param is None: # If no bias estimation, return empty dic
+    if bias_param is None:  # If no bias estimation, return empty dic
         return dict()
     # ------------------------------------------------------------------------
     os.makedirs(folder, exist_ok=True)
@@ -202,9 +215,6 @@ def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param
         bias_p['trainData'] = truth['y'] - y_ref  # [Nt x Nmic x L]
 
     # TODO: clean data. 1. remove FPs, 2. maximize correlation
-
-
-
 
 
     # Add washout ----------------------------------------------------------------
