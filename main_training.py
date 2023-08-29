@@ -52,7 +52,10 @@ if trainData is None:
     filename = 'data/test_results_bias.npy'
     trainData = np.load(filename)
 
-ESN_filename = filename[:-len('bias')] + 'ESN{}_augment{}.mat'.format(N_units, augment_data)
+
+
+ESN_filename = '/'.join(filename.split('/')[:-1])
+ESN_filename += '/ESN{}_augment{}_L{}.mat'.format(N_units, augment_data, L)
 
 # Force trainData to be (Nalpha, Nt, Nmic)
 if len(np.shape(trainData)) == 1:  # (Nt,)
@@ -353,7 +356,7 @@ if test_run:
             plt.close(fig)
         print('Median and max error in', N_alpha, ' test:', np.median(medians_alpha), max(maxs_alpha))
 
-# _________________________________________ Save output and images _________________________________________ %
+# _________________________________________ Save output and images ___________________________________
 
 save_dict = dict(t_train=t_train,
                  t_val=t_val,
@@ -373,7 +376,7 @@ save_dict = dict(t_train=t_train,
                  sigma_in=10 ** minimum[1],
                  tikh=minimum[2],
                  upsample=int(upsample),
-                 hyperparameters=[minimum[0], 10 ** minimum[1], bias_in],
+                 hyperparameters=[minimum[0], 10 ** minimum[1], bias_in[0]],
                  training_time=(N_train + N_val) * dt_ESN,
                  filename=filename,
                  connect=connect

@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pickle
-from Util import createObservations, CR, interpolate
+from Util import createObservations, CR, interpolate, colour_noise
 from DA import dataAssimilation
 
 import matplotlib as mpl
@@ -19,8 +19,13 @@ def main(filter_ens, truth, method, results_dir="results/", save_=False):
     os.makedirs(results_dir, exist_ok=True)
 
     # =========================  PERFORM DATA ASSIMILATION ========================== #
-    filter_ens = dataAssimilation(filter_ens, truth['y_obs'], truth['t_obs'],
-                                  std_obs=truth['std_obs'], method=method)
+    try:
+        filter_ens = dataAssimilation(filter_ens, truth['y_obs'], truth['t_obs'],
+                                      std_obs=truth['std_obs'], method=method)
+    except KeyError:
+        filter_ens = dataAssimilation(filter_ens, truth['p_obs'], truth['t_obs'],
+                                      std_obs=truth['std_obs'], method=method)
+
     # Integrate further without assimilation as ensemble mean (if truth very long, integrate only .2s more)
     Nt_extra = 0
     if filter_ens.hist_t[-1] < truth['t'][-1]:
@@ -31,6 +36,8 @@ def main(filter_ens, truth, method, results_dir="results/", save_=False):
             y = filter_ens.getObservableHist(Nt_extra)
             b, t_b = filter_ens.bias.timeIntegrate(t=t, y=y)
             filter_ens.bias.updateHistory(b, t_b)
+
+    # Close pools <--- Do not forget!
     filter_ens.close()
 
     # ================================== SAVE DATA  ================================== #
@@ -53,12 +60,13 @@ def main(filter_ens, truth, method, results_dir="results/", save_=False):
 # ======================================================================================================================
 # ======================================================================================================================
 def createEnsemble(true_p, forecast_p, filter_p, bias_p,
-                   working_dir="results", filename='reference_Ensemble', results_dir=None):
-    if results_dir is None:
-        results_dir = working_dir
+                   working_dir="results", filename='reference_Ensemble', ensemble_dir=None):
+    if ensemble_dir is None:
+        ensemble_dir = working_dir
+    os.makedirs(ensemble_dir, exist_ok=True)
 
-    if os.path.isfile(results_dir + filename):
-        with open(results_dir + filename, 'rb') as f:
+    if os.path.isfile(ensemble_dir + filename):
+        with open(ensemble_dir + filename, 'rb') as f:
             ensemble = pickle.load(f)
             truth = pickle.load(f)
             b_args = pickle.load(f)
@@ -99,7 +107,12 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
             return ensemble, truth, b_args
 
     # =============================  CREATE OBSERVATIONS ============================== #
-    truth = create_truth(true_p, filter_p)
+    if 'noise_type' not in true_p.keys():
+        noise_type = 'gauss, add'
+    else:
+        noise_type = true_p['noise_type']
+
+    truth = create_truth(true_p, filter_p, noise_type)
 
     # %% =============================  DEFINE BIAS ======================================== #
     if filter_p['biasType'].name == 'ESN':
@@ -110,7 +123,7 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
 
     # ===============================  INITIALISE ENSEMBLE  =============================== #
     ensemble = forecast_p['model'](forecast_p, filter_p)
-    with open(results_dir + filename, 'wb') as f:
+    with open(ensemble_dir + filename, 'wb') as f:
         pickle.dump(ensemble, f)
         pickle.dump(truth, f)
         pickle.dump(args, f)
@@ -118,7 +131,7 @@ def createEnsemble(true_p, forecast_p, filter_p, bias_p,
     return ensemble, truth, args
 
 
-def create_truth(true_p, filter_p):
+def create_truth(true_p, filter_p, noise_type):
     y_true, t_true, name_truth = createObservations(true_p)
 
     if 'manual_bias' in true_p.keys():
@@ -140,33 +153,44 @@ def create_truth(true_p, filter_p):
     obs_idx = np.arange(round(filter_p['t_start'] / dt_t),
                         round(filter_p['t_stop'] / dt_t) + 1, filter_p['kmeas'])
 
-    q = np.shape(y_true)[1]
+    Nt, q = y_true.shape[:2]
     if 'std_obs' not in true_p.keys():
         true_p['std_obs'] = 0.01
 
-    if 'normalized_noise' in true_p.keys() and true_p['normalized_noise']:
+    # Create noise to add to the truth
+    print('Noise type: ', noise_type)
+    if 'gauss' in noise_type.lower():
         Cdd = np.eye(q) * true_p['std_obs'] ** 2
-        noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
-        y_noise = y_true * (1. + noise)
+        noise = rng.multivariate_normal(np.zeros(q), Cdd, Nt)
+    else:
+        noise = np.zeros([Nt, q])
+        for ii in range(q):
+            noise_white = np.fft.rfft(rng.standard_normal(Nt+1) * true_p['std_obs'])
+            # Generate the noise signal
+            S = colour_noise(Nt+1, noise_colour=noise_type)
+            S = noise_white * S / np.sqrt(np.mean(S ** 2))  # Normalize S
+            noise[:, ii] = np.fft.irfft(S)[1:]  # transform back into time domain
+
+    if 'multi' in noise_type.lower():
+        y_noise = y_true * (1 + noise)
     else:
         mean_y = np.mean(abs(y_true))
-        Cdd = np.eye(q) * (true_p['std_obs'] * mean_y) ** 2
-        noise = rng.multivariate_normal(np.zeros(q), Cdd, len(obs_idx))
-        y_noise = y_true + noise
+        y_noise = y_true + noise * mean_y
+
 
     # Select obs_idx only
-    t_obs = t_true[obs_idx]
-    y_obs = y_noise[obs_idx]
+    y_obs, t_obs = y_noise[obs_idx], t_true[obs_idx]
 
     # Compute signal-to-noise ratio
-    m = np.mean(y_noise, 0)
-    sd = np.std(y_noise, axis=0, ddof=0)
-    SNR = np.where(sd == 0, 0, m/sd)
+    P_signal = np.mean(y_true**2, axis=0)
+    P_noise = np.mean((y_noise - y_true)**2, axis=0)
 
+    # Save as a dict
     truth = dict(y=y_true, t=t_true, b=b_true, dt=dt_t,
                  t_obs=t_obs, y_obs=y_obs, dt_obs=t_obs[1] - t_obs[0],
                  true_params=true_p, name=name_truth,
-                 model=true_p['model'], std_obs=true_p['std_obs'], SNR=SNR)
+                 model=true_p['model'], std_obs=true_p['std_obs'],
+                 SNR=P_signal/P_noise, noise=noise, noise_type=noise_type)
     return truth
 
 
@@ -196,13 +220,14 @@ def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param
     name_train += '_std{:.2}_m{}_{}'.format(ref_ens.std_a, ref_ens.m, ref_ens.alpha_distr)
     bias_p['filename'] = folder + truth['name'] + '_' + name_train.split('Truth_')[-1] + '_bias'
 
+    print('create_ESN_train_dataset\n\t', name_train)
     # Load or create reference ensemble ---------------------------------------------
     rerun = True
-    print(name_train)
-    if os.path.isfile(name_train):
+
+    if os.path.exists(os.getcwd() + '/' + name_train):
         with open(name_train, 'rb') as f:
             load_ens = pickle.load(f)
-        if len(truth['t']) <= len(load_ens.hist_t):
+        if truth['t'][-1] <= load_ens.hist_t[-1]:
             ref_ens = load_ens.copy()
             rerun = False
     if rerun:
@@ -222,8 +247,7 @@ def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param
     else:
         bias_p['trainData'] = truth['y'] - y_ref  # [Nt x Nmic x L]
 
-    # TODO: clean data. 1. remove FPs, 2. maximize correlation
-
+    # TODO: clean data. 1. Train with noisy data, 2. remove FPs, 3. maximize correlation
 
     # Add washout ----------------------------------------------------------------
     if 'start_ensemble_forecast' not in filter_p.keys():
@@ -272,17 +296,11 @@ def get_error_metrics(results_folder):
     out['Ls'] = np.array(out['Ls'])[idx]
 
     # Output quantities
-    keys = ['R_biased_DA', 'R_biased_post',
-            'C_biased_DA', 'C_biased_post',
-            'R_unbiased_DA', 'R_unbiased_post',
-            'C_unbiased_DA', 'C_unbiased_post']
-    for key in keys:
-        out[key] = np.empty([len(out['Ls']), len(out['ks'])])
+    for suffix in ['DA', 'post']:
+        for prefix in ['biased_', 'unbiased_']:
+            out['R_' + prefix + suffix] = np.empty([len(out['Ls']), len(out['ks'])])
+            out['C_' + prefix + suffix] = np.empty([len(out['Ls']), len(out['ks'])])
 
-    print(out['Ls'])
-    print(out['ks'])
-
-    from plotResults import post_process_single
     ii = -1
     for Ldir in out['L_dirs']:
         ii += 1
@@ -295,6 +313,7 @@ def get_error_metrics(results_folder):
                 _ = pickle.load(f)
                 truth = pickle.load(f)
                 filter_ens = pickle.load(f)
+
             truth = truth.copy()
 
             print('\t k = ', out['ks'][jj], '({}, {})'.format(filter_ens.bias.L, filter_ens.bias.k))
@@ -310,13 +329,12 @@ def get_error_metrics(results_folder):
             else:
                 y_unbiased = y_mean + b
 
-            # if jj == 0:
             N_CR = int(filter_ens.t_CR // filter_ens.dt)  # Length of interval to compute correlation and RMS
             i0 = np.argmin(abs(t - truth['t_obs'][0]))  # start of assimilation
             i1 = np.argmin(abs(t - truth['t_obs'][-1]))  # end of assimilation
 
             # cut signals to interval of interest
-            y_mean, t, y_unbiased = y_mean[i0 - N_CR:i1 + N_CR], t[i0 - N_CR:i1 + N_CR], y_unbiased[i0 - N_CR:i1 + N_CR]
+            y_mean, t, y_unbiased = [xx[i0 - N_CR:i1 + N_CR] for xx in [y_mean, t, y_unbiased]]
 
             if ii == 0 and jj == 0:
                 i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))  # start of assimilation
@@ -357,6 +375,57 @@ def get_error_metrics(results_folder):
         pickle.dump(out, f)
 
 
+def compute_CR(file):
+    with open(file, 'rb') as f:
+        _ = pickle.load(f)
+        truth = pickle.load(f)
+        filter_ens = pickle.load(f)
+
+    truth = truth.copy()
+    out = dict()
+
+
+    # Compute biased and unbiased signals
+    y, t = filter_ens.getObservableHist(), filter_ens.hist_t
+    b, t_b = filter_ens.bias.hist, filter_ens.bias.hist_t
+    y_mean = np.mean(y, -1)
+
+    # Unbiased signal error
+    if hasattr(filter_ens.bias, 'upsample'):
+        y_unbiased = y_mean[::filter_ens.bias.upsample] + b
+        y_unbiased = interpolate(t_b, y_unbiased, t)
+    else:
+        y_unbiased = y_mean + b
+
+    N_CR = int(filter_ens.t_CR // filter_ens.dt)  # Length of interval to compute correlation and RMS
+    i0 = np.argmin(abs(t - truth['t_obs'][0]))  # start of assimilation
+    i1 = np.argmin(abs(t - truth['t_obs'][-1]))  # end of assimilation
+
+    # cut signals to interval of interest
+    y_mean, t, y_unbiased = [xx[i0 - N_CR:i1 + N_CR] for xx in [y_mean, t, y_unbiased]]
+
+    i0_t = np.argmin(abs(truth['t'] - truth['t_obs'][0]))  # start of assimilation
+    i1_t = np.argmin(abs(truth['t'] - truth['t_obs'][-1]))  # end of assimilation
+    y_truth, t_truth = truth['y'][i0_t - N_CR:i1_t + N_CR], truth['t'][i0_t - N_CR:i1_t + N_CR]
+    y_truth_b = y_truth - truth['b'][i0_t - N_CR:i1_t + N_CR]
+
+    out['C_true'], out['R_true'] = CR(y_truth[-N_CR:], y_truth_b[-N_CR:])
+    out['C_pre'], out['R_pre'] = CR(y_truth[:N_CR], y_mean[:N_CR])
+
+    # End of assimilation
+    for yy, key in zip([y_mean, y_unbiased], ['_biased_DA', '_unbiased_DA']):
+        C, R = CR(y_truth[-N_CR * 2:-N_CR], yy[-N_CR * 2:-N_CR])
+        out['C' + key] = C
+        out['R' + key] = R
+
+    # After Assimilaiton
+    for yy, key in zip([y_mean, y_unbiased], ['_biased_post', '_unbiased_post']):
+        C, R = CR(y_truth[-N_CR:], yy[-N_CR:])
+        out['C' + key] = C
+        out['R' + key] = R
+
+    return out
+
 
 def plot_train_data(truth, train_ens, folder):
 
@@ -377,7 +446,6 @@ def plot_train_data(truth, train_ens, folder):
     for ii in range(y_ref.shape[-1]):
         R = CR(yt, yr[:, :, ii])[1]
         RS.append(R)
-
 
     # Plot training data -------------------------------------
     fig = plt.figure(figsize=[12, 4.5], layout="constrained")

@@ -48,7 +48,6 @@ def createObservations(classParams=None):
             t_max = TA_params['t_max']
         else:
             t_max = 8.
-            print('t_max=8.')
     else:
         raise ValueError('classParams must be dict')
 
@@ -85,19 +84,44 @@ def createObservations(classParams=None):
     os.makedirs(name, exist_ok=True)
     name += 'Truth_{}_{}tmax-{:.2}'.format(classType.name, suffix, t_max)
 
-    # Load or create and save file
-    case = classType(TA_params)
-    psi, t = case.timeIntegrate(Nt=int(t_max / case.dt))
-    case.updateHistory(psi, t)
-    case.close()
-    with open(name, 'wb') as f:
-        pickle.dump(case, f)
+    if not os.path.isfile(name):
+        # Load or create and save file
+        case = classType(TA_params)
+        psi, t = case.timeIntegrate(Nt=int(t_max / case.dt))
+        case.updateHistory(psi, t)
+        case.close()
+        with open(name, 'wb') as f:
+            pickle.dump(case, f)
+    else:
+        with open(name, 'rb') as f:
+            case = pickle.load(f)
+
     # Retrieve observables
     p_obs = case.getObservableHist()
     if len(np.shape(p_obs)) > 2:
         p_obs = np.squeeze(p_obs, axis=-1)
 
     return p_obs, case.hist_t, name.split('Truth_')[-1]
+
+
+def colour_noise(Nt, noise_colour='pink', beta=2):
+    ff = np.fft.rfftfreq(Nt)
+    if 'white' in noise_colour.lower():
+        return np.ones(ff.shape)
+    elif 'blue' in noise_colour.lower():
+        return np.sqrt(ff)
+    elif 'violet' in noise_colour.lower():
+        return ff
+    elif 'pink' in noise_colour.lower():
+        number_ids = [int(xx) for xx in noise_colour if xx.isdigit()]
+        if any(number_ids):
+            beta = number_ids[0]
+        return 1 / np.where(ff == 0, float('inf'), ff ** (1 / beta))
+    elif 'brown' in noise_colour.lower():
+        return 1 / np.where(ff == 0, float('inf'), ff)
+    else:
+        raise ValueError('{} noise type not defined'.format(noise_colour))
+
 
 
 def RK4(t, q0, func, *kwargs):

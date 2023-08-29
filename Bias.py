@@ -96,8 +96,11 @@ class ESN(Bias):
 
     def trainESN(self, Bdict):
         # --------------------- Train a new ESN if not in folder --------------------- #
-        ESN_filename = Bdict['filename'][:-len('bias')] + \
-                       'ESN{}_augment{}'.format(self.N_units, self.augment_data)
+        # ESN_filename = Bdict['filename'][:-len('bias')] + \
+        #                'ESN{}_augment{}'.format(self.N_units, self.augment_data)
+
+        ESN_filename = '/'.join(Bdict['filename'][:-len('bias')] .split('/')[:-1])
+        ESN_filename += '/ESN{}_augment{}_L{}'.format(self.N_units, self.augment_data, self.L)
 
         # Check that the saved ESN has the same parameters as the wanted one
         flag = False
