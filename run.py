@@ -220,7 +220,6 @@ def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param
     name_train += '_std{:.2}_m{}_{}'.format(ref_ens.std_a, ref_ens.m, ref_ens.alpha_distr)
     bias_p['filename'] = folder + truth['name'] + '_' + name_train.split('Truth_')[-1] + '_bias'
 
-    print('create_ESN_train_dataset\n\t', name_train)
     # Load or create reference ensemble ---------------------------------------------
     rerun = True
 
@@ -231,12 +230,14 @@ def create_ESN_train_dataset(filter_p, forecast_model, truth, folder, bias_param
             ref_ens = load_ens.copy()
             rerun = False
     if rerun:
-        print('Creating Reference solution(s)')
+        print('create ESN train dataset\n\t', name_train)
         psi, t = ref_ens.timeIntegrate(Nt=len(truth['t']) - 1)
         ref_ens.updateHistory(psi, t)
         ref_ens.close()
         with open(name_train, 'wb') as f:
             pickle.dump(ref_ens, f)
+    else:
+        print('loaded ESN train dataset\n\t', name_train)
 
     # Create the synthetic bias as innovations ------------------------------------
     y_ref, lbl = ref_ens.getObservableHist(Nt=len(truth['t'])), ref_ens.obsLabels

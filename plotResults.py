@@ -143,23 +143,30 @@ def post_process_noise(results_dir, noise_levels=(None,), noise_colors=None, fig
             _ = pickle.load(f)
             truth = pickle.load(f)
         truth = truth.copy()
-        fig, ax = plt.subplots(3, 1, sharex='all')
+
+        fig, ax = plt.subplots(2, 2, sharex='all', sharey='row', figsize=(6, 3.5), layout="constrained")
+        ax = ax.ravel()
         y_true = truth['y']
-        noise = truth['noise']
+        noise = truth['noise'][-y_true.shape[0]:]
         if 'multi' in truth['noise_type'].lower():
             y_noise = y_true * (1 + noise)
         else:
-            mean_y = np.mean(abs(y_true))
+            mean_y = np.mean(abs(y_true), axis=0)
+            print(mean_y.shape, y_true.shape, noise.shape, truth['t'].shape, truth['t'][0])
             y_noise = y_true + noise * mean_y
 
         SNR = np.mean(10 * np.log10(np.mean(y_true**2, axis=0) /
                                     np.mean((y_noise - y_true)**2, axis=0)))
+        # SNR = np.mean(10 * np.log10((np.mean(y_noise, axis=0) /
+        #                             np.std(y_noise, axis=0))))
 
-        for axi, yy, lbl, c in zip(ax, [y_true, noise, y_noise],
-                                   ['true data', 'noise', 'noisy data'], ['b', 'r', 'g']):
+        for axi, yy, lbl, c in zip(ax, [y_true, y_noise, noise*0., noise],
+                                   ['true data','noisy data', 'noise', 'noise'], ['b', 'g', 'r', 'r']):
             axi.plot(truth['t'], yy[:, 0], color=c)
             axi.legend([lbl])
-        ax[2].set(xlim=[truth['t'][-1] - 0.1, truth['t'][-1]])
+        ax[0].set(xlim=[truth['t'][-1] - 0.04, truth['t'][-1] - 0.008],
+                  ylim=[np.min(y_true[:,0])-np.std(y_true[:,0])*.8, np.max(y_true[:,0])+np.std(y_true[:,0])*.8])
+        ax[-1].set(ylim=[-1, 1])
         fig.suptitle('{}\n{}'.format(truth['noise_type'], SNR))
 
         plt.savefig(figs_dir + '{}_{}.svg'.format(truth['noise_type'], SNR), dpi=350)
