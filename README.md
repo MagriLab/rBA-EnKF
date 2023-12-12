@@ -1,6 +1,14 @@
 # Bias-EnKF
 
-Data Assimilation codes in python
+This repository was used in the publication
+
+    Nóvoa, A., Racca, A. & Magri, L. (2023)
+    Inferring unknown unknowns: Regularized bias-aware ensemble Kalman filter. 
+    Computer Methods in Applied Mechanics and Engineering, 418, 116502.
+
+
+
+--------------------------------------------------
 
 Available filters:
 - EnKF
