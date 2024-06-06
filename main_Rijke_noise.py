@@ -17,7 +17,6 @@ if __name__ == '__main__':
     noise_levels = (.001, .01, .1, .2, .3)
 
     # %% ================================ SELECT WORKING PATHS ================================= #
-    os.chdir('/mscott/an553/')  # set working directory to mscott
     path_dir = os.path.realpath(__file__).split('main')[0]  # path to figures
     folder = 'results/Rijke_final_{}/m50/'.format(bias_form)
 
