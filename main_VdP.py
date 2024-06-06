@@ -7,7 +7,6 @@ if __name__ == '__main__':
     import os as os
 
     path_dir = os.path.realpath(__file__).split('main')[0]
-    os.chdir('/mscott/an553/')  # set working directory to mscott
     folder = 'results/VdP_final/'
 
     whyAugment_folder = folder + 'results_whyAugment/'
