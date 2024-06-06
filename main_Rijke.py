@@ -22,7 +22,6 @@ if __name__ == '__main__':
         # %% ================================ SELECT WORKING PATHS ================================= #
         folder = 'results/Rijke_final_{}/'.format(bias_form)
         path_dir = os.path.realpath(__file__).split('main')[0]
-        os.chdir('/mscott/an553/')  # set working directory to mscott
 
         loopParams_folder = folder + 'm{}/results_loopParams/'.format(mm)
         optimal_folder = folder + 'm{}/results_optimal/'.format(mm)
