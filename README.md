@@ -1,12 +1,14 @@
 # Bias-EnKF
 
-This repository was used in the publication
+--------------------------------------------------
+
+This repository was used in for the publication
 
     Nóvoa, A., Racca, A. & Magri, L. (2023)
     Inferring unknown unknowns: Regularized bias-aware ensemble Kalman filter. 
     Computer Methods in Applied Mechanics and Engineering, 418, 116502.
 
-
+Note: this repo is not being maintained. The most recent version which includes tutorials can be found in [real-time bias aware DA](https://github.com/MagriLab/real-time-bias-aware-DA).
 
 --------------------------------------------------
 
