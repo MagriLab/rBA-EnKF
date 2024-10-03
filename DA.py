@@ -374,31 +374,15 @@ def rBA_EnKF(Af, d, Cdd, Cbb, k, M, b, J, get_cost=False):
     else:
         CdWb = np.dot(Cdd, linalg.inv(Cbb))
 
-    Cinv = (Nm - 1) * Cdd + np.dot(Iq + J, np.dot(Cqq, (Iq + J).T)) + k * np.dot(CdWb, np.dot(J, np.dot(Cqq, J.T)))
+    Cinv = (Nm - 1) * Cdd + np.dot(np.dot(Iq + J).T, Iq + J), Cqq) + k * np.dot(CdWb, np.dot(np.dot(J.T, J), Cqq))
     K = np.dot(Psi_f, np.dot(S.T, linalg.inv(Cinv)))
-    Aa = Af + np.dot(K, np.dot(Iq + J, D - Y) - k * np.dot(CdWb, np.dot(J, B)))
+    Aa = Af + np.dot(K, np.dot(Iq + J.T, D - Y) - k * np.dot(CdWb, np.dot(J.T, B)))
 
     # Compute cost function terms (this could be commented out to increase speed)
     cost = np.array([None] * 4)
     if np.isreal(Aa).all():
         if get_cost:  # Compute cost function terms
-            ba = b + np.dot(J, np.mean(np.dot(M, Aa) - Q, -1))
-            Ya = np.dot(M, Aa) + np.expand_dims(ba, -1)
-            Wdd = linalg.inv(Cdd)
-            Wpp = linalg.pinv(np.dot(Psi_f, Psi_f.T))
-            Wbb = k * linalg.inv(Cbb)
-
-            cost[0] = np.dot(np.mean(Af - Aa, -1).T, np.dot(Wpp, np.mean(Af - Aa, -1)))
-            cost[1] = np.dot(np.mean(np.expand_dims(d, -1) - Ya, -1).T, 
-                             np.dot(Wdd, np.mean(np.expand_dims(d, -1) - Ya, -1)))
-            cost[2] = np.dot(ba.T, np.dot(Wbb, ba))
-
-            dbdpsi = np.dot(M.T, J.T)
-            dydpsi = dbdpsi + M.T
-
-            Ba = np.repeat(np.expand_dims(ba, 1), Nm, axis=1)
-            dJdpsi = np.dot(Wpp, Af - Aa) + np.dot(dydpsi, np.dot(Wdd, Ya - D)) + np.dot(dbdpsi, np.dot(Wbb, Ba))
-            cost[3] = abs(np.mean(dJdpsi) / 2.)
+            raise NotImplementedError()
         return Aa, cost
     else:
         print('Aa not real')
