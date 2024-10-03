@@ -10,19 +10,10 @@ This repository was used in [Nóvoa et al. (2023)](https://doi.org/10.1016/j.cma
     Inferring unknown unknowns: Regularized bias-aware ensemble Kalman filter. 
     Computer Methods in Applied Mechanics and Engineering, 418, 116502.
 
-_Errata_: The r-EnKF equations (15)-(16) in Nóvoa et al. (2023) have a typo. The equations in this repository are correct. Please, see the Erratum [here](https://github.com/MagriLab/rBA-EnKF/blob/main/Erratum.pdf), which includes the corrected equations as well as a detailed derivation. 
-
 --------------------------------------------------
 
-Available filters:
-- EnKF
-- EnSRKF
-- Regularized bias-aware EnKF
+_Errata_: 
+- The r-EnKF equations (15)-(16) in Nóvoa et al. (2023) have a typo. The equations in this repository are correct.
+  Please, see the Erratum [here](https://github.com/MagriLab/rBA-EnKF/blob/main/Erratum.pdf), which includes the corrected equations as well as a detailed derivation. 
 
-Available models:
-- Rijke tube (dimensional with Galerkin discretisation)
-- Van der Pol
- 
-Available bias estimator:
-- Echo State Network
-- NoBias
+--------------------------------------------------
