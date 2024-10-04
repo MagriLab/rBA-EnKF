@@ -374,7 +374,7 @@ def rBA_EnKF(Af, d, Cdd, Cbb, k, M, b, J, get_cost=False):
     else:
         CdWb = np.dot(Cdd, linalg.inv(Cbb))
 
-    Cinv = (Nm - 1) * Cdd + np.dot(np.dot(Iq + J).T, Iq + J), Cqq) + k * np.dot(CdWb, np.dot(np.dot(J.T, J), Cqq))
+    Cinv = (Nm - 1) * Cdd + np.dot(np.dot((Iq + J).T, Iq + J), Cqq) + k * np.dot(CdWb, np.dot(np.dot(J.T, J), Cqq))
     K = np.dot(Psi_f, np.dot(S.T, linalg.inv(Cinv)))
     Aa = Af + np.dot(K, np.dot(Iq + J.T, D - Y) - k * np.dot(CdWb, np.dot(J.T, B)))
 
